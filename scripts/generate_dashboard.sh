@@ -109,6 +109,75 @@ with open(OUT_STATUS, 'w', encoding='utf-8') as f:
     json.dump(status, f, indent=2, sort_keys=True)
     f.write('\n')
 
+# Load persisted feedback for drafting and hiding dismissed.
+FEEDBACK_PATH = os.path.join(os.path.dirname(WATCHLIST), 'feedback.json')
+feedback_days = {}
+try:
+    with open(FEEDBACK_PATH, 'r', encoding='utf-8') as f:
+        fb = json.load(f)
+        if isinstance(fb, dict):
+            feedback_days = fb.get('days') if isinstance(fb.get('days'), dict) else {}
+except Exception:
+    feedback_days = {}
+
+def latest_feedback(alert_id: str):
+    """Return (day, rec) for latest feedback for this alert across all days."""
+    best_day, best_rec, best_ts = None, None, None
+    for d, mp in (feedback_days or {}).items():
+        if not isinstance(mp, dict):
+            continue
+        rec = mp.get(alert_id)
+        if not isinstance(rec, dict):
+            continue
+        ts = rec.get('updated_at') or ''
+        if best_ts is None or str(ts) > str(best_ts):
+            best_ts = ts
+            best_day = d
+            best_rec = rec
+    return best_day, best_rec
+
+def is_dismissed(alert_id: str) -> bool:
+    _, rec = latest_feedback(alert_id)
+    return bool((rec or {}).get('dismissed'))
+
+def find_similar_feedback(kind: str, key_parts: list) -> str:
+    """Find dismissed feedback for similar alerts and draft a note."""
+    similar_notes = []
+    kind_prefix = kind
+    for d, mp in (feedback_days or {}).items():
+        if not isinstance(mp, dict):
+            continue
+        for aid, rec in mp.items():
+            if len(similar_notes) >= 2:
+                break
+            if not isinstance(rec, dict):
+                continue
+            if not rec.get('dismissed'):
+                continue
+            note = str(rec.get('note') or '').strip()
+            if not note or len(note) < 8 or note.lower() in ('test', 'testing', 'tbd'):
+                continue
+            # Check if aid matches similar pattern
+            aid_s = str(aid)
+            if not aid_s.startswith(kind_prefix):
+                continue
+            # Check for overlapping key parts
+            matches = sum(1 for p in key_parts if p and str(p).lower() in aid_s.lower())
+            if matches > 0:
+                similar_notes.append(note)
+        if len(similar_notes) >= 2:
+            break
+    if similar_notes:
+        return "Similar prior: " + " | ".join(similar_notes[:2])
+    return ""
+
+import hashlib
+
+def make_alert_id(kind: str, *parts) -> str:
+    """Generate a stable alert ID."""
+    key = kind + '|' + '|'.join(str(p) for p in parts)
+    return kind + '_' + hashlib.sha256(key.encode()).hexdigest()[:12]
+
 style = """
 :root {
   --bg: #f8fafc;
@@ -261,6 +330,118 @@ footer {
   color: var(--text-muted);
   font-size: 12px;
 }
+.triage-box {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 10px;
+}
+.triage-box .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.triage-box textarea {
+  width: 100%;
+  min-height: 60px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+}
+.triage-box select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  font-size: 13px;
+}
+.triage-box button {
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+}
+.triage-box button:hover { background: #2563eb; }
+.triage-box label { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+.triage-box input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent); }
+.triage-box .status { font-size: 12px; color: var(--text-muted); }
+details.triage-toggle { margin-top: 8px; border: none; background: transparent; }
+details.triage-toggle summary { padding: 4px 0; font-size: 12px; }
+details.triage-toggle summary::before { content: ''; }
+.hidden { display: none !important; }
+"""
+
+js_code = """
+const DAY = document.body.dataset.day || new Date().toISOString().slice(0,10);
+
+async function loadFeedback(alertId) {
+  try {
+    const r = await fetch(`/api/feedback?day=${encodeURIComponent(DAY)}`, { cache: 'no-store' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j.feedback || {})[alertId] || null;
+  } catch(e) { return null; }
+}
+
+async function saveFeedback(alertId) {
+  const box = document.querySelector(`[data-alert-id="${CSS.escape(alertId)}"]`);
+  if (!box) return;
+  const noteEl = box.querySelector('.triage-note');
+  const verdictEl = box.querySelector('.triage-verdict');
+  const dismissEl = box.querySelector('.triage-dismiss');
+  const statusEl = box.querySelector('.status');
+
+  const rec = {
+    day: DAY,
+    alert_id: alertId,
+    updated_at: new Date().toISOString(),
+    verdict: verdictEl ? verdictEl.value : 'unsure',
+    note: noteEl ? noteEl.value : '',
+    dismissed: dismissEl ? dismissEl.checked : false
+  };
+
+  if (statusEl) statusEl.textContent = 'saving…';
+  try {
+    const r = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rec)
+    });
+    if (statusEl) statusEl.textContent = r.ok ? 'saved ✓' : 'error';
+    if (rec.dismissed && box.closest('.alert-item')) {
+      box.closest('.alert-item').classList.add('hidden');
+    }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = 'error';
+  }
+}
+
+async function hydrateAll() {
+  const boxes = document.querySelectorAll('[data-alert-id]');
+  for (const box of boxes) {
+    const alertId = box.dataset.alertId;
+    const fb = await loadFeedback(alertId);
+    if (!fb) continue;
+    const noteEl = box.querySelector('.triage-note');
+    const verdictEl = box.querySelector('.triage-verdict');
+    const dismissEl = box.querySelector('.triage-dismiss');
+    if (noteEl && fb.note) noteEl.value = fb.note;
+    if (verdictEl && fb.verdict) verdictEl.value = fb.verdict;
+    if (dismissEl) dismissEl.checked = !!fb.dismissed;
+    if (fb.dismissed && box.closest('.alert-item')) {
+      box.closest('.alert-item').classList.add('hidden');
+    }
+  }
+}
+
+window.addEventListener('DOMContentLoaded', hydrateAll);
+window.saveFeedback = saveFeedback;
 """
 
 body = []
@@ -270,7 +451,7 @@ body.append('<title>HomeSigSec Dashboard</title>')
 body.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
 body.append('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>')
 body.append('<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">')
-body.append(f'<style>{style}</style></head><body>')
+body.append(f'<style>{style}</style></head><body data-day="{html.escape(DAY)}">')
 body.append('<header><div class="inner">')
 body.append('<h1>🛡️ HomeSigSec</h1>')
 body.append(f"<p class='subtitle'>RF Environment Monitor · Generated {html.escape(status['generated_at'])}</p>")
@@ -308,15 +489,43 @@ else:
         for ent in rogues:
             ssid = ent['ssid']
             rogue = ent['rogue_bssids']
-            body.append('<div class="alert-item">')
-            body.append(f"<h3>⚠️ {html.escape(ssid)}</h3>")
-            body.append('<div class="metrics">')
-            body.append(f"<div class='metric'><span class='label'>Approved</span> {len(ent['approved_bssids'])}</div>")
-            body.append(f"<div class='metric'><span class='label'>Seen</span> {len(ent['seen_bssids'])}</div>")
-            body.append(f"<div class='metric danger'><span class='label'>Rogue</span> {len(rogue)}</div>")
-            body.append('</div>')
-            body.append('<pre>' + html.escape('\n'.join(rogue)) + '</pre>')
-            body.append('</div>')
+            # Generate stable alert ID for each rogue BSSID
+            for rbssid in rogue:
+                alert_id = make_alert_id('rogue_ap', ssid, rbssid)
+                if is_dismissed(alert_id):
+                    continue  # Skip dismissed alerts
+                
+                draft_note = find_similar_feedback('rogue_ap', [ssid, rbssid])
+                _, prev_fb = latest_feedback(alert_id)
+                prev_verdict = (prev_fb or {}).get('verdict', 'unsure')
+                
+                body.append(f'<div class="alert-item" id="alert-{html.escape(alert_id)}">')
+                body.append(f"<h3>⚠️ Rogue AP on {html.escape(ssid)}</h3>")
+                body.append('<div class="metrics">')
+                body.append(f"<div class='metric danger'><span class='label'>BSSID</span> {html.escape(rbssid)}</div>")
+                body.append('</div>')
+                
+                # Triage dropdown
+                body.append(f'<details class="triage-toggle"><summary>💬 Triage & Comment</summary>')
+                body.append(f'<div class="triage-box" data-alert-id="{html.escape(alert_id)}">')
+                body.append(f'<textarea class="triage-note" placeholder="Add notes...">{html.escape(draft_note)}</textarea>')
+                body.append('<div class="row">')
+                
+                def verdict_opt(val, label, selected):
+                    sel = ' selected' if selected == val else ''
+                    return f'<option value="{val}"{sel}>{label}</option>'
+                
+                body.append('<select class="triage-verdict">')
+                body.append(verdict_opt('unsure', 'Unsure', prev_verdict))
+                body.append(verdict_opt('benign', 'Benign', prev_verdict))
+                body.append(verdict_opt('review', 'Needs Review', prev_verdict))
+                body.append(verdict_opt('suspicious', 'Suspicious', prev_verdict))
+                body.append('</select>')
+                body.append(f'<label><input type="checkbox" class="triage-dismiss"> Dismiss</label>')
+                body.append(f'<button onclick="saveFeedback(\'{html.escape(alert_id)}\')">Save</button>')
+                body.append('<span class="status"></span>')
+                body.append('</div></div></details>')
+                body.append('</div>')
 
 # Config dropdown
 try:
@@ -419,9 +628,38 @@ else:
     else:
         for v in violations:
             who = f"{v['label']} ({v['mac']})" if v.get('label') else v['mac']
-            body.append('<div class="alert-item">')
+            alert_id = make_alert_id('device_violation', v['mac'], v['ssid'])
+            if is_dismissed(alert_id):
+                continue  # Skip dismissed alerts
+            
+            draft_note = find_similar_feedback('device_violation', [v['mac'], v['ssid'], v.get('label', '')])
+            _, prev_fb = latest_feedback(alert_id)
+            prev_verdict = (prev_fb or {}).get('verdict', 'unsure')
+            
+            body.append(f'<div class="alert-item" id="alert-{html.escape(alert_id)}">')
             body.append(f"<h3>⚠️ {html.escape(who)}</h3>")
             body.append(f"<span class='badge'>Connected to: {html.escape(str(v['ssid']))}</span>")
+            
+            # Triage dropdown
+            body.append(f'<details class="triage-toggle"><summary>💬 Triage & Comment</summary>')
+            body.append(f'<div class="triage-box" data-alert-id="{html.escape(alert_id)}">')
+            body.append(f'<textarea class="triage-note" placeholder="Add notes...">{html.escape(draft_note)}</textarea>')
+            body.append('<div class="row">')
+            
+            def verdict_opt(val, label, selected):
+                sel = ' selected' if selected == val else ''
+                return f'<option value="{val}"{sel}>{label}</option>'
+            
+            body.append('<select class="triage-verdict">')
+            body.append(verdict_opt('unsure', 'Unsure', prev_verdict))
+            body.append(verdict_opt('benign', 'Benign', prev_verdict))
+            body.append(verdict_opt('review', 'Needs Review', prev_verdict))
+            body.append(verdict_opt('suspicious', 'Suspicious', prev_verdict))
+            body.append('</select>')
+            body.append(f'<label><input type="checkbox" class="triage-dismiss"> Dismiss</label>')
+            body.append(f'<button onclick="saveFeedback(\'{html.escape(alert_id)}\')">Save</button>')
+            body.append('<span class="status"></span>')
+            body.append('</div></div></details>')
             body.append('</div>')
 
 # Fingerprint status dropdown
@@ -457,6 +695,7 @@ body.append('</div>')
 
 body.append('</div>')  # close .container
 body.append('<footer>HomeSigSec · RF Environment Monitor</footer>')
+body.append(f'<script>{js_code}</script>')
 body.append('</body></html>')
 
 with open(OUT_HTML, 'w', encoding='utf-8') as f:
