@@ -114,25 +114,35 @@ body.append('<h1>HomeSigSec</h1>')
 body.append(f"<div class='muted'>Generated: {html.escape(status['generated_at'])} · Day: <code>{html.escape(DAY)}</code></div>")
 
 body.append('<div class="card">')
-body.append('<h2>SSID → BSSID monitoring</h2>')
+body.append('<h2>SSID → BSSID monitoring (rogue AP alerts)</h2>')
+
+# Config dropdown
+try:
+    cfg_text = json.dumps(wl, indent=2, sort_keys=True)
+except Exception:
+    cfg_text = ''
+body.append('<details style="margin:10px 0"><summary>Show current watchlist config (from disk)</summary>')
+body.append('<pre>' + html.escape(cfg_text or '(missing)') + '</pre></details>')
+
 if not watched:
     body.append('<div class="muted">No watched SSIDs configured yet. Create local watchlist under <code>$HOMESIGSEC_WORKDIR/state/ssid_approved_bssids.local.json</code>.</div>')
 else:
     body.append(f"<div class='row'><div class='pill'>watched_ssids={len(watched)}</div><div class='pill {'bad' if rogues_total else ''}'>rogue_bssids={rogues_total}</div></div>")
-    for ent in panel:
-        ssid = ent['ssid']
-        rogue = ent['rogue_bssids']
-        body.append('<hr>')
-        body.append(f"<h3>{html.escape(ssid)}</h3>")
-        body.append(f"<div class='row'><div class='pill'>approved={len(ent['approved_bssids'])}</div><div class='pill'>seen_recent={len(ent['seen_bssids'])}</div><div class='pill {'bad' if rogue else ''}'>rogue={len(rogue)}</div></div>")
 
-        if rogue:
+    # Only render SSIDs which currently have rogue BSSIDs.
+    rogues = [ent for ent in panel if (ent.get('rogue_bssids') or [])]
+    if not rogues:
+        body.append('<div class="muted" style="margin-top:10px">No rogue APs detected in the recent window.</div>')
+    else:
+        for ent in rogues:
+            ssid = ent['ssid']
+            rogue = ent['rogue_bssids']
+            body.append('<hr>')
+            body.append(f"<h3>{html.escape(ssid)}</h3>")
+            body.append(f"<div class='row'><div class='pill'>approved={len(ent['approved_bssids'])}</div><div class='pill'>seen_recent={len(ent['seen_bssids'])}</div><div class='pill bad'>rogue={len(rogue)}</div></div>")
+
             body.append('<div class="muted">Unapproved BSSIDs observed recently:</div>')
             body.append('<pre>' + html.escape('\n'.join(rogue)) + '</pre>')
-        body.append('<details><summary>All seen BSSIDs (recent)</summary>')
-        body.append('<pre>' + html.escape('\n'.join(ent['seen_bssids']) or '(none)') + '</pre></details>')
-        body.append('<details><summary>Approved BSSIDs</summary>')
-        body.append('<pre>' + html.escape('\n'.join(ent['approved_bssids']) or '(none)') + '</pre></details>')
 
 body.append('</div>')
 body.append('</body></html>')
