@@ -172,7 +172,7 @@ else:
 body.append('</div>')
 
 body.append('<div class="card">')
-body.append('<h2>SSID → BSSID monitoring</h2>')
+body.append('<h2>Rogue AP Monitoring</h2>')
 
 # Config dropdown
 try:
@@ -206,7 +206,7 @@ body.append('</div>')
 
 # Device MAC → allowed SSIDs monitoring
 body.append('<div class="card">')
-body.append('<h2>Device → allowed SSIDs</h2>')
+body.append('<h2>Select Device SSID Monitoring</h2>')
 
 try:
     mac_cfg_text = json.dumps(mac_cfg, indent=2, sort_keys=True)
@@ -256,7 +256,35 @@ with open(OUT_STATUS, 'w', encoding='utf-8') as f:
     json.dump(status, f, indent=2, sort_keys=True)
     f.write('\n')
 
-body.append(f"<div class='row'><div class='pill'>watched_macs={len(devices)}</div><div class='pill {'bad' if violations else ''}'>violations={len(violations)}</div></div>")
+# Merge fingerprint status into device panel
+fp_map = {}
+try:
+    if os.path.exists(DB_PATH):
+        con2 = sqlite3.connect(DB_PATH)
+        con2.row_factory = sqlite3.Row
+        for r in con2.execute('select device_mac,status,reason,packets_total,fingerprint_hash,updated_at from fingerprint_device_status'):
+            fp_map[str(r['device_mac']).lower()] = dict(r)
+        con2.close()
+except Exception:
+    fp_map = {}
+
+ok_fp = 0
+ins_fp = 0
+for mac in devices.keys():
+    st = (fp_map.get(str(mac).lower()) or {}).get('status')
+    if st == 'ok':
+        ok_fp += 1
+    elif st:
+        ins_fp += 1
+
+body.append(
+    f"<div class='row'>"
+    f"<div class='pill'>watched_macs={len(devices)}</div>"
+    f"<div class='pill {'bad' if violations else ''}'>violations={len(violations)}</div>"
+    f"<div class='pill'>fingerprints_ok={ok_fp}</div>"
+    f"<div class='pill {'bad' if ins_fp else ''}'>fingerprints_insufficient={ins_fp}</div>"
+    f"</div>"
+)
 
 if not devices:
     body.append('<div class="muted" style="margin-top:10px">No watched device MACs configured yet.</div>')
@@ -269,6 +297,27 @@ else:
         body.append('<hr>')
         body.append(f"<h3>{html.escape(who)}</h3>")
         body.append(f"<div class='row'><div class='pill bad'>ssid={html.escape(str(v['ssid']))}</div></div>")
+
+# Fingerprint status dropdown within this panel
+lines = []
+for mac, rec in sorted(devices.items(), key=lambda kv: (str(kv[1].get('label') or kv[0]).lower())):
+    m = str(mac).lower()
+    fp = fp_map.get(m) or {}
+    label = str(rec.get('label') or '') if isinstance(rec, dict) else ''
+    who = f"{label} ({m})" if label else m
+    st = fp.get('status') or 'unknown'
+    reason = fp.get('reason') or ''
+    packets = fp.get('packets_total')
+    fph = fp.get('fingerprint_hash') or ''
+    extra = f" packets={packets}" if packets is not None else ''
+    if st == 'ok':
+        lines.append(f"ok: {who} fp={fph}{extra}")
+    else:
+        tail = (f" - {reason}" if reason else '')
+        lines.append(f"{st}: {who}{tail}{extra}")
+
+body.append('<details style="margin:10px 0"><summary>Show fingerprint status for selected devices</summary>')
+body.append('<pre>' + html.escape('\n'.join(lines) or '(none)') + '</pre></details>')
 
 body.append('</div>')
 
