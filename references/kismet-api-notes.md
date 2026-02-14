@@ -49,4 +49,12 @@ Source:
 
 - Prefer polling `last-time/-N` endpoints on a schedule (incremental) rather than dumping the full DB.
 - Use `fields` to request only the columns needed for each analysis task.
+- For SSID/BSSID integrity and client association, we’ll want fields which include:
+  - AP: SSID, BSSID, channel/frequency, last_time, signal stats
+  - Client: client MAC, associated BSSID (or network key), last_time, and (if available) probed SSIDs
+- Store raw responses locally under `output/` only (never in git).
+
+
+- Prefer polling `last-time/-N` endpoints on a schedule (incremental) rather than dumping the full DB.
+- Use `fields` to request only the columns needed for each analysis task.
 - Store raw responses locally under `output/` only (never in git).

@@ -47,6 +47,33 @@ Recommended initial tables (all local-only):
 
 ## Analyses you requested
 
+### (NEW) Unknown MACs attempting to connect to watched SSIDs
+
+Goal:
+- Highlight devices (MACs) which appear to be attempting to join **your watched SSIDs** but which are not in your approved device list.
+
+Data sources (Kismet):
+- Prefer explicit *association/authentication* events if exposed in the Wi‑Fi client view.
+- If not available, fall back to probe requests ("is someone looking for this SSID") while clearly labeling it as a weaker signal.
+
+Inputs (local-only config):
+- watched SSIDs + approved BSSIDs: `ssid_approved_bssids.local.json`
+- known/approved device MACs + allowed SSIDs: `device_allowed_ssids.local.json`
+
+Method (association-based):
+1) Build a set of BSSIDs which advertise watched SSIDs (from AP view).
+2) Look for client records associating to those BSSIDs.
+3) If client MAC is not in the approved device list, emit:
+   - `kind=unknown_mac_on_watched_ssid`
+
+Method (probe-based fallback):
+1) Look for client probe requests for SSIDs in watched list (if Kismet reports probed SSIDs).
+2) If MAC not approved, emit:
+   - `kind=unknown_mac_probe_for_watched_ssid`
+
+Dashboard:
+- These should be highlighted prominently (top of Active alerts), because they represent possible unauthorized join attempts.
+
 ### (A) SSID integrity: detect rogue BSSID advertising your SSIDs
 
 Inputs (local-only config):
@@ -109,6 +136,29 @@ Initial dashboard pages (single page is fine first):
 - Poll interval: start with 30–60s for incremental device views, then tune.
 - Implement backoff on API failure.
 - Persist last successful poll timestamp per view.
+
+## AdGuard Home integration (device attribution)
+
+You asked for the ability to query AdGuard Home for client **MAC addresses**.
+
+Reality check from the AdGuard Home API:
+- `/control/clients` returns a client list where `ids` are typically **IP addresses** (ex: `192.168.x.x`).
+- It does not reliably provide MAC addresses by itself.
+
+So, for MAC-level attribution we should plan on one of these approaches:
+1) **Local inventory mapping (recommended, simplest, local-only):**
+   - You provide the device MAC list (the watchlist already requires this), plus a friendly label.
+2) If you want automatic MAC↔IP enrichment, we’ll need an additional source such as:
+   - DHCP lease table from your router/firewall (ex: OPNsense DHCP API), or
+   - an ARP table snapshot source.
+
+We can still use AdGuard for **friendly names** / labels for IPs (as in HomeNetSec), but MACs will come from the watchlist and/or DHCP.
+
+## How you will define mappings (files)
+
+See `references/watchlists-format.md` for the exact local-only JSON formats for:
+- SSID → approved BSSIDs
+- Device MAC → allowed SSIDs
 
 ## What connection details we will need from you
 
