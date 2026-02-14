@@ -141,34 +141,32 @@ def is_dismissed(alert_id: str) -> bool:
     return bool((rec or {}).get('dismissed'))
 
 def find_similar_feedback(kind: str, key_parts: list) -> str:
-    """Find dismissed feedback for similar alerts and draft a note."""
-    similar_notes = []
+    """Find dismissed feedback for similar alerts and draft a note.
+    
+    Returns the note from a closely matching dismissed alert, or empty string.
+    We do NOT fabricate comments - only return real prior feedback.
+    """
     kind_prefix = kind
     for d, mp in (feedback_days or {}).items():
         if not isinstance(mp, dict):
             continue
         for aid, rec in mp.items():
-            if len(similar_notes) >= 2:
-                break
             if not isinstance(rec, dict):
                 continue
             if not rec.get('dismissed'):
                 continue
             note = str(rec.get('note') or '').strip()
-            if not note or len(note) < 8 or note.lower() in ('test', 'testing', 'tbd'):
+            # Skip useless notes
+            if not note or len(note) < 10 or note.lower() in ('test', 'testing', 'tbd', 'unable to generate comments.'):
                 continue
             # Check if aid matches similar pattern
             aid_s = str(aid)
             if not aid_s.startswith(kind_prefix):
                 continue
-            # Check for overlapping key parts
+            # Require at least 2 key parts to match for a "similar" alert
             matches = sum(1 for p in key_parts if p and str(p).lower() in aid_s.lower())
-            if matches > 0:
-                similar_notes.append(note)
-        if len(similar_notes) >= 2:
-            break
-    if similar_notes:
-        return "Similar prior: " + " | ".join(similar_notes[:2])
+            if matches >= 2:
+                return note  # Return first good match
     return ""
 
 import hashlib
@@ -496,6 +494,8 @@ else:
                     continue  # Skip dismissed alerts
                 
                 draft_note = find_similar_feedback('rogue_ap', [ssid, rbssid])
+                if not draft_note:
+                    draft_note = "Unable to generate comments."
                 _, prev_fb = latest_feedback(alert_id)
                 prev_verdict = (prev_fb or {}).get('verdict', 'unsure')
                 
@@ -633,6 +633,8 @@ else:
                 continue  # Skip dismissed alerts
             
             draft_note = find_similar_feedback('device_violation', [v['mac'], v['ssid'], v.get('label', '')])
+            if not draft_note:
+                draft_note = "Unable to generate comments."
             _, prev_fb = latest_feedback(alert_id)
             prev_verdict = (prev_fb or {}).get('verdict', 'unsure')
             
