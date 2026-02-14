@@ -80,12 +80,27 @@ for ssid in watched:
         'rogue_bssids': rogue,
     })
 
+# Load device MAC -> allowed SSIDs mapping (local-only)
+mac_cfg_path = os.path.join(os.path.dirname(WATCHLIST), 'device_allowed_ssids.local.json')
+mac_cfg = {}
+try:
+    with open(mac_cfg_path, 'r', encoding='utf-8') as f:
+        mac_cfg = json.load(f)
+except FileNotFoundError:
+    mac_cfg = {}
+except Exception:
+    mac_cfg = {}
+
 status = {
     'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S%z', time.localtime()),
     'day': DAY,
     'ssid_bssid_panel': {
         'watched_ssids': len(watched),
         'rogue_bssids': rogues_total,
+    },
+    'device_ssid_panel': {
+        'watched_macs': len((mac_cfg.get('devices') or {}) if isinstance(mac_cfg.get('devices'), dict) else {}),
+        'violations': 0,
     }
 }
 
@@ -145,6 +160,75 @@ else:
             body.append('<pre>' + html.escape('\n'.join(rogue)) + '</pre>')
 
 body.append('</div>')
+
+# Device MAC → allowed SSIDs monitoring
+body.append('<div class="card">')
+body.append('<h2>Device → allowed SSIDs</h2>')
+
+try:
+    mac_cfg_text = json.dumps(mac_cfg, indent=2, sort_keys=True)
+except Exception:
+    mac_cfg_text = ''
+body.append('<details style="margin:10px 0"><summary>Show current device/SSID config (from disk)</summary>')
+body.append('<pre>' + html.escape(mac_cfg_text or '(missing)') + '</pre></details>')
+
+devices = mac_cfg.get('devices') if isinstance(mac_cfg.get('devices'), dict) else {}
+default_allowed = mac_cfg.get('default_allowed_ssids') if isinstance(mac_cfg.get('default_allowed_ssids'), list) else []
+
+def allowed_for(mac: str):
+    rec = devices.get(mac) if isinstance(devices, dict) else None
+    if isinstance(rec, dict) and isinstance(rec.get('allowed_ssids'), list) and rec.get('allowed_ssids'):
+        return [str(x) for x in rec.get('allowed_ssids')]
+    return [str(x) for x in default_allowed]
+
+violations = []
+if os.path.exists(DB_PATH) and devices:
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    since = int(time.time()) - 2*3600
+    macs = list(devices.keys())
+    q = """
+    SELECT client_mac, ssid, max(ts) as ts_max
+    FROM wifi_client_sightings
+    WHERE client_mac IN ({}) AND ts >= ? AND ssid IS NOT NULL AND ssid != ''
+    GROUP BY client_mac, ssid
+    ORDER BY ts_max DESC
+    """.format(",".join(["?"]*len(macs)))
+    cur = con.execute(q, [*macs, since])
+    for r in cur.fetchall():
+        mac = r['client_mac']
+        ssid = r['ssid']
+        allowed = set(allowed_for(mac))
+        if allowed and ssid not in allowed:
+            label = ''
+            rec = devices.get(mac) if isinstance(devices, dict) else None
+            if isinstance(rec, dict):
+                label = str(rec.get('label') or '')
+            violations.append({"mac": mac, "label": label, "ssid": ssid, "ts": int(r['ts_max'] or 0)})
+    con.close()
+
+status['device_ssid_panel']['violations'] = len(violations)
+# Rewrite status.json after computing violations (overwrite previous).
+with open(OUT_STATUS, 'w', encoding='utf-8') as f:
+    json.dump(status, f, indent=2, sort_keys=True)
+    f.write('\n')
+
+body.append(f"<div class='row'><div class='pill'>watched_macs={len(devices)}</div><div class='pill {'bad' if violations else ''}'>violations={len(violations)}</div></div>")
+
+if not devices:
+    body.append('<div class="muted" style="margin-top:10px">No watched device MACs configured yet.</div>')
+elif not violations:
+    body.append('<div class="muted" style="margin-top:10px">No device SSID violations detected in the recent window.</div>')
+    body.append('<div class="muted small">(Note: this requires wifi client ingestion into <code>wifi_client_sightings</code>; it may be empty until we add that collector.)</div>')
+else:
+    for v in violations:
+        who = f"{v['label']} ({v['mac']})" if v.get('label') else v['mac']
+        body.append('<hr>')
+        body.append(f"<h3>{html.escape(who)}</h3>")
+        body.append(f"<div class='row'><div class='pill bad'>ssid={html.escape(str(v['ssid']))}</div></div>")
+
+body.append('</div>')
+
 body.append('</body></html>')
 
 with open(OUT_HTML, 'w', encoding='utf-8') as f:
