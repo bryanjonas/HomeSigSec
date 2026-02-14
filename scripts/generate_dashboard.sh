@@ -128,48 +128,16 @@ body.append(f'<style>{style}</style></head><body>')
 body.append('<h1>HomeSigSec</h1>')
 body.append(f"<div class='muted'>Generated: {html.escape(status['generated_at'])} · Day: <code>{html.escape(DAY)}</code></div>")
 
-# Fingerprint health panel
+# Load latest fingerprint run summary (to be shown inside the device SSID panel)
 fp_summary = None
-fp_rows = []
 try:
     if os.path.exists(DB_PATH):
         con = sqlite3.connect(DB_PATH)
         con.row_factory = sqlite3.Row
         fp_summary = con.execute('select stored, insufficient, min_packets, updated_at from fingerprint_runs order by id desc limit 1').fetchone()
-        fp_rows = con.execute('select device_mac,label,status,reason,packets_total,fingerprint_hash,updated_at from fingerprint_device_status order by status desc, label asc').fetchall()
         con.close()
 except Exception:
     fp_summary = None
-    fp_rows = []
-
-body.append('<div class="card">')
-body.append('<h2>Fingerprint status</h2>')
-if not fp_summary:
-    body.append('<div class="muted">No fingerprint runs recorded yet. Run <code>python3 scripts/fingerprint_devices.py</code>.</div>')
-else:
-    body.append(f"<div class='row'><div class='pill'>stored={int(fp_summary['stored'])}</div><div class='pill {'bad' if int(fp_summary['insufficient']) else ''}'>insufficient={int(fp_summary['insufficient'])}</div><div class='pill'>min_packets={int(fp_summary['min_packets'])}</div></div>")
-    body.append(f"<div class='muted small' style='margin-top:8px'>last_run: <code>{html.escape(str(fp_summary['updated_at']))}</code></div>")
-
-    # dropdown with per-device status
-    lines = []
-    for r in fp_rows:
-        mac = r['device_mac']
-        label = r['label'] or ''
-        st = r['status']
-        reason = r['reason'] or ''
-        pkt = r['packets_total']
-        fph = r['fingerprint_hash'] or ''
-        who = f"{label} ({mac})" if label else mac
-        extra = f" packets={pkt}" if pkt is not None else ''
-        if st != 'ok':
-            lines.append(f"{st}: {who} - {reason}{extra}")
-        else:
-            lines.append(f"ok: {who} fp={fph}{extra}")
-
-    body.append('<details style="margin:10px 0"><summary>Show per-device fingerprint status</summary>')
-    body.append('<pre>' + html.escape('\n'.join(lines) or '(none)') + '</pre></details>')
-
-body.append('</div>')
 
 body.append('<div class="card">')
 body.append('<h2>Rogue AP Monitoring</h2>')
@@ -217,6 +185,19 @@ body.append('<pre>' + html.escape(mac_cfg_text or '(missing)') + '</pre></detail
 
 devices = mac_cfg.get('devices') if isinstance(mac_cfg.get('devices'), dict) else {}
 default_allowed = mac_cfg.get('default_allowed_ssids') if isinstance(mac_cfg.get('default_allowed_ssids'), list) else []
+
+# Fingerprint run summary (shown here, not as a separate panel)
+if not fp_summary:
+    body.append('<div class="muted small">Fingerprinting: no runs recorded yet (run <code>python3 scripts/fingerprint_devices.py</code>).</div>')
+else:
+    body.append(
+        f"<div class='row' style='margin-top:8px'>"
+        f"<div class='pill'>fp_stored={int(fp_summary['stored'])}</div>"
+        f"<div class='pill {'bad' if int(fp_summary['insufficient']) else ''}'>fp_insufficient={int(fp_summary['insufficient'])}</div>"
+        f"<div class='pill'>fp_min_packets={int(fp_summary['min_packets'])}</div>"
+        f"</div>"
+    )
+    body.append(f"<div class='muted small'>fp_last_run: <code>{html.escape(str(fp_summary['updated_at']))}</code></div>")
 
 def allowed_for(mac: str):
     rec = devices.get(mac) if isinstance(devices, dict) else None
