@@ -110,23 +110,172 @@ with open(OUT_STATUS, 'w', encoding='utf-8') as f:
     f.write('\n')
 
 style = """
-body{font-family:system-ui,Arial,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px}
-.card{border:1px solid #ddd;border-radius:10px;padding:16px;margin:16px 0}
-.row{display:flex;gap:12px;flex-wrap:wrap}
-.pill{display:inline-block;border:1px solid #ccc;border-radius:999px;padding:2px 8px;font-size:12px;color:#333;background:#fafafa}
-.bad{border-color:#b42318;color:#b42318;background:#fff5f5}
-.muted{color:#555}
-code{background:#f6f6f6;padding:1px 4px;border-radius:4px}
-pre{background:#0b1020;color:#e8eefc;padding:14px;border-radius:10px;overflow:auto;white-space:pre-wrap}
+:root {
+  --bg: #f8fafc;
+  --card-bg: #ffffff;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-muted: #64748b;
+  --accent: #3b82f6;
+  --success: #10b981;
+  --success-bg: #ecfdf5;
+  --warning: #f59e0b;
+  --warning-bg: #fffbeb;
+  --danger: #ef4444;
+  --danger-bg: #fef2f2;
+  --code-bg: #f1f5f9;
+  --pre-bg: #0f172a;
+  --pre-text: #e2e8f0;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-lg: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06);
+}
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 0;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 24px 20px 48px; }
+header {
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  color: #fff;
+  padding: 32px 20px;
+  margin-bottom: 24px;
+}
+header .inner { max-width: 960px; margin: 0 auto; }
+header h1 { margin: 0 0 4px; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+header .subtitle { color: #94a3b8; font-size: 14px; margin: 0; }
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+.card h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.card h2 .icon { font-size: 20px; }
+.metrics { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.metric.success { background: var(--success-bg); color: #047857; }
+.metric.warning { background: var(--warning-bg); color: #b45309; }
+.metric.danger { background: var(--danger-bg); color: #b91c1c; }
+.metric .label { color: var(--text-muted); font-weight: 400; }
+.muted { color: var(--text-muted); font-size: 14px; }
+.small { font-size: 13px; }
+code {
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+}
+pre {
+  background: var(--pre-bg);
+  color: var(--pre-text);
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+details {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+details summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  list-style: none;
+}
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: '▸ '; color: var(--text-muted); }
+details[open] summary::before { content: '▾ '; }
+details > pre { margin: 0; border-radius: 0 0 8px 8px; }
+hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+.alert-item {
+  background: var(--danger-bg);
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 12px 0;
+}
+.alert-item h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #b91c1c;
+}
+.alert-item .badge {
+  display: inline-block;
+  background: #fecaca;
+  color: #991b1b;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.status-ok { color: var(--success); }
+.status-warn { color: var(--warning); }
+.status-bad { color: var(--danger); }
+.empty-state {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+}
+.empty-state .icon { font-size: 32px; margin-bottom: 8px; opacity: 0.5; }
+footer {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
 """
 
 body = []
-body.append('<!doctype html><html><head><meta charset="utf-8">')
+body.append('<!doctype html><html lang="en"><head><meta charset="utf-8">')
 body.append('<meta name="viewport" content="width=device-width,initial-scale=1">')
 body.append('<title>HomeSigSec Dashboard</title>')
+body.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
+body.append('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>')
+body.append('<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">')
 body.append(f'<style>{style}</style></head><body>')
-body.append('<h1>HomeSigSec</h1>')
-body.append(f"<div class='muted'>Generated: {html.escape(status['generated_at'])} · Day: <code>{html.escape(DAY)}</code></div>")
+body.append('<header><div class="inner">')
+body.append('<h1>🛡️ HomeSigSec</h1>')
+body.append(f"<p class='subtitle'>RF Environment Monitor · Generated {html.escape(status['generated_at'])}</p>")
+body.append('</div></header>')
+body.append('<div class="container">')
 
 # Load latest fingerprint run summary (to be shown inside the device SSID panel)
 fp_summary = None
@@ -140,64 +289,51 @@ except Exception:
     fp_summary = None
 
 body.append('<div class="card">')
-body.append('<h2>Rogue AP Monitoring</h2>')
+body.append('<h2><span class="icon">📡</span> Rogue AP Monitoring</h2>')
+
+if not watched:
+    body.append('<div class="empty-state"><div class="icon">📡</div><p>No watched SSIDs configured yet.<br>Create local watchlist under <code>$HOMESIGSEC_WORKDIR/state/ssid_approved_bssids.local.json</code></p></div>')
+else:
+    rogue_class = 'danger' if rogues_total else 'success'
+    body.append('<div class="metrics">')
+    body.append(f"<div class='metric'><span class='label'>Watched SSIDs</span> {len(watched)}</div>")
+    body.append(f"<div class='metric {rogue_class}'><span class='label'>Rogue BSSIDs</span> {rogues_total}</div>")
+    body.append('</div>')
+
+    # Only render SSIDs which currently have rogue BSSIDs.
+    rogues = [ent for ent in panel if (ent.get('rogue_bssids') or [])]
+    if not rogues:
+        body.append('<div class="empty-state"><div class="icon">✅</div><p>No rogue APs detected in the recent window.</p></div>')
+    else:
+        for ent in rogues:
+            ssid = ent['ssid']
+            rogue = ent['rogue_bssids']
+            body.append('<div class="alert-item">')
+            body.append(f"<h3>⚠️ {html.escape(ssid)}</h3>")
+            body.append('<div class="metrics">')
+            body.append(f"<div class='metric'><span class='label'>Approved</span> {len(ent['approved_bssids'])}</div>")
+            body.append(f"<div class='metric'><span class='label'>Seen</span> {len(ent['seen_bssids'])}</div>")
+            body.append(f"<div class='metric danger'><span class='label'>Rogue</span> {len(rogue)}</div>")
+            body.append('</div>')
+            body.append('<pre>' + html.escape('\n'.join(rogue)) + '</pre>')
+            body.append('</div>')
 
 # Config dropdown
 try:
     cfg_text = json.dumps(wl, indent=2, sort_keys=True)
 except Exception:
     cfg_text = ''
-body.append('<details style="margin:10px 0"><summary>Show current watchlist config (from disk)</summary>')
+body.append('<details><summary>View watchlist configuration</summary>')
 body.append('<pre>' + html.escape(cfg_text or '(missing)') + '</pre></details>')
-
-if not watched:
-    body.append('<div class="muted">No watched SSIDs configured yet. Create local watchlist under <code>$HOMESIGSEC_WORKDIR/state/ssid_approved_bssids.local.json</code>.</div>')
-else:
-    body.append(f"<div class='row'><div class='pill'>watched_ssids={len(watched)}</div><div class='pill {'bad' if rogues_total else ''}'>rogue_bssids={rogues_total}</div></div>")
-
-    # Only render SSIDs which currently have rogue BSSIDs.
-    rogues = [ent for ent in panel if (ent.get('rogue_bssids') or [])]
-    if not rogues:
-        body.append('<div class="muted" style="margin-top:10px">No rogue APs detected in the recent window.</div>')
-    else:
-        for ent in rogues:
-            ssid = ent['ssid']
-            rogue = ent['rogue_bssids']
-            body.append('<hr>')
-            body.append(f"<h3>{html.escape(ssid)}</h3>")
-            body.append(f"<div class='row'><div class='pill'>approved={len(ent['approved_bssids'])}</div><div class='pill'>seen_recent={len(ent['seen_bssids'])}</div><div class='pill bad'>rogue={len(rogue)}</div></div>")
-
-            body.append('<div class="muted">Unapproved BSSIDs observed recently:</div>')
-            body.append('<pre>' + html.escape('\n'.join(rogue)) + '</pre>')
 
 body.append('</div>')
 
 # Device MAC → allowed SSIDs monitoring
 body.append('<div class="card">')
-body.append('<h2>Select Device SSID Monitoring</h2>')
-
-try:
-    mac_cfg_text = json.dumps(mac_cfg, indent=2, sort_keys=True)
-except Exception:
-    mac_cfg_text = ''
-body.append('<details style="margin:10px 0"><summary>Show current device/SSID config (from disk)</summary>')
-body.append('<pre>' + html.escape(mac_cfg_text or '(missing)') + '</pre></details>')
+body.append('<h2><span class="icon">📱</span> Select Device SSID Monitoring</h2>')
 
 devices = mac_cfg.get('devices') if isinstance(mac_cfg.get('devices'), dict) else {}
 default_allowed = mac_cfg.get('default_allowed_ssids') if isinstance(mac_cfg.get('default_allowed_ssids'), list) else []
-
-# Fingerprint run summary (shown here, not as a separate panel)
-if not fp_summary:
-    body.append('<div class="muted small">Fingerprinting: no runs recorded yet (run <code>python3 scripts/fingerprint_devices.py</code>).</div>')
-else:
-    body.append(
-        f"<div class='row' style='margin-top:8px'>"
-        f"<div class='pill'>fp_stored={int(fp_summary['stored'])}</div>"
-        f"<div class='pill {'bad' if int(fp_summary['insufficient']) else ''}'>fp_insufficient={int(fp_summary['insufficient'])}</div>"
-        f"<div class='pill'>fp_min_packets={int(fp_summary['min_packets'])}</div>"
-        f"</div>"
-    )
-    body.append(f"<div class='muted small'>fp_last_run: <code>{html.escape(str(fp_summary['updated_at']))}</code></div>")
 
 def allowed_for(mac: str):
     rec = devices.get(mac) if isinstance(devices, dict) else None
@@ -258,28 +394,37 @@ for mac in devices.keys():
     elif st:
         ins_fp += 1
 
-body.append(
-    f"<div class='row'>"
-    f"<div class='pill'>watched_macs={len(devices)}</div>"
-    f"<div class='pill {'bad' if violations else ''}'>violations={len(violations)}</div>"
-    f"<div class='pill'>fingerprints_ok={ok_fp}</div>"
-    f"<div class='pill {'bad' if ins_fp else ''}'>fingerprints_insufficient={ins_fp}</div>"
-    f"</div>"
-)
-
 if not devices:
-    body.append('<div class="muted" style="margin-top:10px">No watched device MACs configured yet.</div>')
-elif not violations:
-    body.append('<div class="muted" style="margin-top:10px">No device SSID violations detected in the recent window.</div>')
-    body.append('<div class="muted small">(Note: this requires wifi client ingestion into <code>wifi_client_sightings</code>; it may be empty until we add that collector.)</div>')
+    body.append('<div class="empty-state"><div class="icon">📱</div><p>No watched device MACs configured yet.</p></div>')
 else:
-    for v in violations:
-        who = f"{v['label']} ({v['mac']})" if v.get('label') else v['mac']
-        body.append('<hr>')
-        body.append(f"<h3>{html.escape(who)}</h3>")
-        body.append(f"<div class='row'><div class='pill bad'>ssid={html.escape(str(v['ssid']))}</div></div>")
+    viol_class = 'danger' if violations else 'success'
+    fp_ok_class = 'success' if ok_fp else ''
+    fp_ins_class = 'warning' if ins_fp else ''
 
-# Fingerprint status dropdown within this panel
+    body.append('<div class="metrics">')
+    body.append(f"<div class='metric'><span class='label'>Watched Devices</span> {len(devices)}</div>")
+    body.append(f"<div class='metric {viol_class}'><span class='label'>Violations</span> {len(violations)}</div>")
+    body.append(f"<div class='metric {fp_ok_class}'><span class='label'>Fingerprints OK</span> {ok_fp}</div>")
+    body.append(f"<div class='metric {fp_ins_class}'><span class='label'>Fingerprints Insufficient</span> {ins_fp}</div>")
+    body.append('</div>')
+
+    # Fingerprint run summary
+    if fp_summary:
+        body.append(f"<p class='muted small'>Last fingerprint run: <code>{html.escape(str(fp_summary['updated_at']))}</code> · min_packets: {int(fp_summary['min_packets'])}</p>")
+    else:
+        body.append('<p class="muted small">No fingerprint runs recorded yet. Run <code>python3 scripts/fingerprint_devices.py</code></p>')
+
+    if not violations:
+        body.append('<div class="empty-state"><div class="icon">✅</div><p>No SSID violations detected in the recent window.</p></div>')
+    else:
+        for v in violations:
+            who = f"{v['label']} ({v['mac']})" if v.get('label') else v['mac']
+            body.append('<div class="alert-item">')
+            body.append(f"<h3>⚠️ {html.escape(who)}</h3>")
+            body.append(f"<span class='badge'>Connected to: {html.escape(str(v['ssid']))}</span>")
+            body.append('</div>')
+
+# Fingerprint status dropdown
 lines = []
 for mac, rec in sorted(devices.items(), key=lambda kv: (str(kv[1].get('label') or kv[0]).lower())):
     m = str(mac).lower()
@@ -290,18 +435,28 @@ for mac, rec in sorted(devices.items(), key=lambda kv: (str(kv[1].get('label') o
     reason = fp.get('reason') or ''
     packets = fp.get('packets_total')
     fph = fp.get('fingerprint_hash') or ''
-    extra = f" packets={packets}" if packets is not None else ''
+    extra = f" · packets={packets}" if packets is not None else ''
     if st == 'ok':
-        lines.append(f"ok: {who} fp={fph}{extra}")
+        lines.append(f"✓ {who} · fp={fph}{extra}")
     else:
-        tail = (f" - {reason}" if reason else '')
-        lines.append(f"{st}: {who}{tail}{extra}")
+        tail = (f" · {reason}" if reason else '')
+        lines.append(f"✗ {who}{tail}{extra}")
 
-body.append('<details style="margin:10px 0"><summary>Show fingerprint status for selected devices</summary>')
+body.append('<details><summary>View fingerprint status for selected devices</summary>')
 body.append('<pre>' + html.escape('\n'.join(lines) or '(none)') + '</pre></details>')
+
+# Device config dropdown
+try:
+    mac_cfg_text = json.dumps(mac_cfg, indent=2, sort_keys=True)
+except Exception:
+    mac_cfg_text = ''
+body.append('<details><summary>View device/SSID configuration</summary>')
+body.append('<pre>' + html.escape(mac_cfg_text or '(missing)') + '</pre></details>')
 
 body.append('</div>')
 
+body.append('</div>')  # close .container
+body.append('<footer>HomeSigSec · RF Environment Monitor</footer>')
 body.append('</body></html>')
 
 with open(OUT_HTML, 'w', encoding='utf-8') as f:
