@@ -64,14 +64,16 @@ seen_by_ssid = {s: [] for s in watched}
 for r in rows:
     seen_by_ssid.setdefault(r['ssid'], []).append(r)
 
-# Compute rogue bssids
+# Compute rogue bssids (excluding dismissed)
 panel = []
 rogues_total = 0
 for ssid in watched:
     seen = [str(x['bssid']).lower() for x in seen_by_ssid.get(ssid, []) if x.get('bssid')]
     seen_set = sorted(set(seen))
     appr_set = sorted(set([str(x).lower() for x in (approved.get(ssid) or [])]))
-    rogue = [b for b in seen_set if b not in set(appr_set)]
+    rogue_all = [b for b in seen_set if b not in set(appr_set)]
+    # Filter out dismissed rogues from count
+    rogue = [b for b in rogue_all if not is_dismissed(make_alert_id('rogue_ap', ssid, b))]
     rogues_total += len(rogue)
     panel.append({
         'ssid': ssid,
@@ -576,11 +578,21 @@ if os.path.exists(DB_PATH) and devices:
             violations.append({"mac": mac, "label": label, "ssid": ssid, "ts": int(r['ts_max'] or 0)})
     con.close()
 
-status['device_ssid_panel']['violations'] = len(violations)
+# Filter out dismissed violations from the count
+active_violations = []
+for v in violations:
+    alert_id = make_alert_id('device_violation', v['mac'], v['ssid'])
+    if not is_dismissed(alert_id):
+        active_violations.append(v)
+
+status['device_ssid_panel']['violations'] = len(active_violations)
 # Rewrite status.json after computing violations (overwrite previous).
 with open(OUT_STATUS, 'w', encoding='utf-8') as f:
     json.dump(status, f, indent=2, sort_keys=True)
     f.write('\n')
+
+# Use active_violations for rendering
+violations = active_violations
 
 # Merge fingerprint status into device panel
 fp_map = {}
@@ -629,8 +641,7 @@ else:
         for v in violations:
             who = f"{v['label']} ({v['mac']})" if v.get('label') else v['mac']
             alert_id = make_alert_id('device_violation', v['mac'], v['ssid'])
-            if is_dismissed(alert_id):
-                continue  # Skip dismissed alerts
+            # Already filtered out dismissed in active_violations
             
             draft_note = find_similar_feedback('device_violation', [v['mac'], v['ssid'], v.get('label', '')])
             if not draft_note:
