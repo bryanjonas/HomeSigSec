@@ -23,6 +23,8 @@ fi
 cd "$ROOT_DIR/assets"
 
 # Use a stable project name to avoid orphan warnings across repos.
+# Export env vars so they override any placeholder values in assets/.env
+export HOMESIGSEC_WORKDIR="$WORKDIR"
 docker compose -p homesigsec-dashboard -f dashboard-compose.yml up -d --build
 
-echo "[homesigsec] dashboard services up (nginx on :8088)"
+echo "[homesigsec] dashboard services up (nginx on :8090 LAN, :8091 TS by default)"
