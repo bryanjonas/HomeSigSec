@@ -170,7 +170,7 @@ The HTML is generated (server-side) into `output/www/`. Re-run:
 - Add BT/TPMS/RF panels and retention controls
 
 Design notes:
-- `references/management_frame_fingerprinting_system.md`
+- `references/fingerprinting-current.md` (what is implemented now)
 - `references/database-design.md`
 
 ---
