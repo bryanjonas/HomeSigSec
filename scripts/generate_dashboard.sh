@@ -114,7 +114,7 @@ body.append('<h1>HomeSigSec</h1>')
 body.append(f"<div class='muted'>Generated: {html.escape(status['generated_at'])} · Day: <code>{html.escape(DAY)}</code></div>")
 
 body.append('<div class="card">')
-body.append('<h2>SSID → BSSID monitoring (rogue AP alerts)</h2>')
+body.append('<h2>SSID → BSSID monitoring</h2>')
 
 # Config dropdown
 try:
