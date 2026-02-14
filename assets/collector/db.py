@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""HomeSigSec sqlite helpers.
+"""SQLite helpers for the collector container.
 
-No secrets in repo. DB lives under $HOMESIGSEC_WORKDIR/state/homesigsec.sqlite (gitignored).
+This file duplicates schema init from scripts/db.py to avoid importing from outside the build context.
 """
 
 from __future__ import annotations
@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS bt_sightings (
   source TEXT,
   PRIMARY KEY (ts, btaddr)
 );
-CREATE INDEX IF NOT EXISTS idx_bt_btaddr_ts ON bt_sightings (btaddr, ts);
 
 CREATE TABLE IF NOT EXISTS rf_sightings (
   ts INTEGER NOT NULL,
@@ -84,7 +83,6 @@ CREATE TABLE IF NOT EXISTS rf_sightings (
   source TEXT,
   PRIMARY KEY (ts, rf_id)
 );
-CREATE INDEX IF NOT EXISTS idx_rf_id_ts ON rf_sightings (rf_id, ts);
 
 CREATE TABLE IF NOT EXISTS alerts (
   alert_id TEXT PRIMARY KEY,
@@ -97,16 +95,12 @@ CREATE TABLE IF NOT EXISTS alerts (
   status TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS device_fingerprints (
-  device_mac TEXT PRIMARY KEY,
-  label TEXT,
-  fingerprint_hash TEXT NOT NULL,
-  features_json TEXT NOT NULL,
-  packets_total INTEGER,
-  data_bytes INTEGER,
-  first_seen INTEGER,
-  last_seen INTEGER,
-  updated_at TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS alert_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alert_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  event TEXT NOT NULL,
+  data_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS eventbus_events (
@@ -121,6 +115,18 @@ CREATE TABLE IF NOT EXISTS eventbus_events (
 );
 CREATE INDEX IF NOT EXISTS idx_eventbus_topic_ts ON eventbus_events (topic, ts);
 CREATE INDEX IF NOT EXISTS idx_eventbus_mac_ts ON eventbus_events (mac, ts);
+
+CREATE TABLE IF NOT EXISTS device_fingerprints (
+  device_mac TEXT PRIMARY KEY,
+  label TEXT,
+  fingerprint_hash TEXT NOT NULL,
+  features_json TEXT NOT NULL,
+  packets_total INTEGER,
+  data_bytes INTEGER,
+  first_seen INTEGER,
+  last_seen INTEGER,
+  updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS fingerprint_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,15 +146,6 @@ CREATE TABLE IF NOT EXISTS fingerprint_device_status (
   fingerprint_hash TEXT,
   updated_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS alert_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  alert_id TEXT NOT NULL,
-  ts INTEGER NOT NULL,
-  event TEXT NOT NULL,
-  data_json TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_alert_events_alert_ts ON alert_events (alert_id, ts);
 """
 
 

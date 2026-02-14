@@ -19,3 +19,16 @@ services:
       - HOMESIGSEC_WORKDIR=${HOMESIGSEC_WORKDIR:-/work/output}
     volumes:
       - ${HOMESIGSEC_WORKDIR:-./../output}:/work/output
+
+  homesigsec-eventbus:
+    build:
+      context: ./collector
+    restart: unless-stopped
+    environment:
+      - HOMESIGSEC_WORKDIR=${HOMESIGSEC_WORKDIR:-/work/output}
+      - KISMET_URL=${KISMET_URL}
+      - KISMET_API_TOKEN=${KISMET_API_TOKEN}
+      - KISMET_USER=${KISMET_USER}
+      - KISMET_PASS=${KISMET_PASS}
+    volumes:
+      - ${HOMESIGSEC_WORKDIR:-./../output}:/work/output

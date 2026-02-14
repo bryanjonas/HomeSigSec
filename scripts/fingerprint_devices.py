@@ -105,10 +105,20 @@ def main():
     insufficient = []
     stored = []
 
+    # Reset per-device status table each run (local-only DB)
+    con.execute("DELETE FROM fingerprint_device_status")
+    con.commit()
+
     for mac, meta in targets.items():
         it = by_mac.get(mac)
         if not it:
-            insufficient.append((mac, meta.get("label"), "not in current Kismet view"))
+            reason = "not in current Kismet view"
+            insufficient.append((mac, meta.get("label"), reason))
+            con.execute(
+                "INSERT OR REPLACE INTO fingerprint_device_status(device_mac,label,status,reason,packets_total,fingerprint_hash,updated_at) VALUES (?,?,?,?,?,?,?)",
+                (mac, meta.get("label") or "", "insufficient", reason, None, None, now_iso()),
+            )
+            con.commit()
             continue
 
         typ = str(it.get("kismet.device.base.type") or "")
@@ -129,7 +139,13 @@ def main():
 
         # Determine if we have enough information
         if packets_total < args.min_packets and not (feats.get("probe_fp") or feats.get("response_fp")):
-            insufficient.append((mac, meta.get("label"), f"low packets_total={packets_total}"))
+            reason = f"low packets_total={packets_total}"
+            insufficient.append((mac, meta.get("label"), reason))
+            con.execute(
+                "INSERT OR REPLACE INTO fingerprint_device_status(device_mac,label,status,reason,packets_total,fingerprint_hash,updated_at) VALUES (?,?,?,?,?,?,?)",
+                (mac, meta.get("label") or "", "insufficient", reason, packets_total, None, now_iso()),
+            )
+            con.commit()
             continue
 
         fph = compute_hash(feats)
@@ -152,8 +168,19 @@ def main():
                 now_iso(),
             ),
         )
+        con.execute(
+            "INSERT OR REPLACE INTO fingerprint_device_status(device_mac,label,status,reason,packets_total,fingerprint_hash,updated_at) VALUES (?,?,?,?,?,?,?)",
+            (mac, meta.get("label") or "", "ok", "", packets_total, fph, now_iso()),
+        )
         con.commit()
         stored.append((mac, meta.get("label"), fph, packets_total))
+
+    # record run summary
+    con.execute(
+        "INSERT INTO fingerprint_runs(ts, updated_at, stored, insufficient, min_packets) VALUES (?,?,?,?,?)",
+        (int(time.time()), now_iso(), len(stored), len(insufficient), int(args.min_packets)),
+    )
+    con.commit()
 
     print(f"fingerprints_stored={len(stored)}")
     for mac, label, fph, packets in sorted(stored, key=lambda x: (x[1] or x[0])):
