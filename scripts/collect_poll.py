@@ -75,16 +75,18 @@ def ingest_ap_view(con, ts_now: int, view: str, items: list[dict]):
         if not isinstance(it, dict):
             continue
         bssid = it.get("kismet.device.base.macaddr")
+        bssid = str(bssid).lower() if bssid else bssid
         last_time = _maybe_int(it.get("kismet.device.base.last_time"))
         first_time = _maybe_int(it.get("kismet.device.base.first_time"))
         channel = it.get("kismet.device.base.channel")
         freq = _maybe_int(it.get("kismet.device.base.frequency"))
 
-        # signal is nested; keep best-effort
-        sig = None
-        s = it.get("kismet.device.base.signal")
-        if isinstance(s, dict):
-            sig = _maybe_int(s.get("kismet.common.signal.last_signal"))
+        # signal may be nested or promoted
+        sig = _maybe_int(it.get("kismet.common.signal.last_signal"))
+        if sig is None:
+            s = it.get("kismet.device.base.signal")
+            if isinstance(s, dict):
+                sig = _maybe_int(s.get("kismet.common.signal.last_signal"))
 
         # SSID(s) can appear either nested under it['dot11.device'] (full records)
         # or promoted to a flat key like 'dot11.device.advertised_ssid_map' when using
@@ -112,6 +114,72 @@ def ingest_ap_view(con, ts_now: int, view: str, items: list[dict]):
                 """,
                 (ts_now, ssid, bssid, channel, freq, sig, first_time, last_time, view),
             )
+    con.commit()
+
+
+def _infer_ssid_for_bssid(con, bssid: str) -> str:
+    # Use most recent AP sighting for this BSSID.
+    try:
+        row = con.execute(
+            """
+            SELECT ssid FROM wifi_ap_sightings
+            WHERE bssid = ? AND ssid IS NOT NULL AND ssid != ''
+            ORDER BY ts DESC
+            LIMIT 1
+            """,
+            (bssid,),
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        return ""
+    return ""
+
+
+def ingest_client_view(con, ts_now: int, view: str, items: list[dict]):
+    cur = con.cursor()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+
+        typ = (it.get("kismet.device.base.type") or "").strip()
+        if typ not in ("Wi-Fi Client", "Wi-Fi Device"):
+            # Keep it conservative; AP types would create noise.
+            continue
+
+        mac = it.get("kismet.device.base.macaddr")
+        if not mac:
+            continue
+        mac = str(mac).lower()
+
+        last_time = _maybe_int(it.get("kismet.device.base.last_time"))
+        first_time = _maybe_int(it.get("kismet.device.base.first_time"))
+
+        sig = _maybe_int(it.get("kismet.common.signal.last_signal"))
+        if sig is None:
+            s = it.get("kismet.device.base.signal")
+            if isinstance(s, dict):
+                sig = _maybe_int(s.get("kismet.common.signal.last_signal"))
+
+        # associated bssid
+        assoc = None
+        dot11 = it.get("dot11.device") if isinstance(it.get("dot11.device"), dict) else None
+        if isinstance(dot11, dict):
+            assoc = dot11.get("dot11.device.last_bssid")
+        if assoc is None:
+            assoc = it.get("dot11.device.last_bssid")
+        assoc = str(assoc).lower() if assoc else ""
+
+        ssid = _infer_ssid_for_bssid(con, assoc) if assoc else ""
+
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO wifi_client_sightings
+              (ts, client_mac, associated_bssid, ssid, signal_dbm, first_seen, last_seen, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (ts_now, mac, assoc, ssid, sig, first_time, last_time, view),
+        )
     con.commit()
 
 
@@ -150,16 +218,33 @@ def main():
 
             payload = {"start": 0, "length": 5000, "datatable": False}
             if not args.full:
-                # minimal fields to keep storage manageable
-                payload["fields"] = [
-                    "kismet.device.base.macaddr",
-                    "kismet.device.base.first_time",
-                    "kismet.device.base.last_time",
-                    "kismet.device.base.channel",
-                    "kismet.device.base.frequency",
-                    "kismet.device.base.signal/kismet.common.signal.last_signal",
-                    "dot11.device/dot11.device.advertised_ssid_map",
-                ]
+                # minimal fields to keep storage manageable (per view)
+                if view == "phydot11_accesspoints":
+                    payload["fields"] = [
+                        "kismet.device.base.macaddr",
+                        "kismet.device.base.first_time",
+                        "kismet.device.base.last_time",
+                        "kismet.device.base.channel",
+                        "kismet.device.base.frequency",
+                        "kismet.device.base.signal/kismet.common.signal.last_signal",
+                        "dot11.device/dot11.device.advertised_ssid_map",
+                    ]
+                elif view == "phy-IEEE802.11":
+                    payload["fields"] = [
+                        "kismet.device.base.macaddr",
+                        "kismet.device.base.type",
+                        "kismet.device.base.first_time",
+                        "kismet.device.base.last_time",
+                        "kismet.device.base.signal/kismet.common.signal.last_signal",
+                        "dot11.device/dot11.device.last_bssid",
+                    ]
+                else:
+                    payload["fields"] = [
+                        "kismet.device.base.macaddr",
+                        "kismet.device.base.type",
+                        "kismet.device.base.first_time",
+                        "kismet.device.base.last_time",
+                    ]
 
             resp = post_json(path, payload)
             items = _get_items(resp)
@@ -170,6 +255,8 @@ def main():
 
             if view == "phydot11_accesspoints":
                 ingest_ap_view(con, ts_now, view, items)
+            elif view == "phy-IEEE802.11":
+                ingest_client_view(con, ts_now, view, items)
 
         except Exception as e:
             status = "error"

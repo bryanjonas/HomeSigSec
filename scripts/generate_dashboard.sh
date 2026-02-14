@@ -68,9 +68,9 @@ for r in rows:
 panel = []
 rogues_total = 0
 for ssid in watched:
-    seen = [x['bssid'] for x in seen_by_ssid.get(ssid, []) if x.get('bssid')]
+    seen = [str(x['bssid']).lower() for x in seen_by_ssid.get(ssid, []) if x.get('bssid')]
     seen_set = sorted(set(seen))
-    appr_set = sorted(set([str(x) for x in (approved.get(ssid) or [])]))
+    appr_set = sorted(set([str(x).lower() for x in (approved.get(ssid) or [])]))
     rogue = [b for b in seen_set if b not in set(appr_set)]
     rogues_total += len(rogue)
     panel.append({
@@ -186,12 +186,12 @@ if os.path.exists(DB_PATH) and devices:
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     since = int(time.time()) - 2*3600
-    macs = list(devices.keys())
+    macs = [str(m).lower() for m in list(devices.keys())]
     q = """
-    SELECT client_mac, ssid, max(ts) as ts_max
+    SELECT lower(client_mac) as client_mac, ssid, max(ts) as ts_max
     FROM wifi_client_sightings
-    WHERE client_mac IN ({}) AND ts >= ? AND ssid IS NOT NULL AND ssid != ''
-    GROUP BY client_mac, ssid
+    WHERE lower(client_mac) IN ({}) AND ts >= ? AND ssid IS NOT NULL AND ssid != ''
+    GROUP BY lower(client_mac), ssid
     ORDER BY ts_max DESC
     """.format(",".join(["?"]*len(macs)))
     cur = con.execute(q, [*macs, since])

@@ -18,5 +18,5 @@ fi
 
 python3 "$ROOT_DIR/scripts/collect_poll.py" \
   --workdir "$WORKDIR" \
-  --views "phydot11_accesspoints" \
+  --views "phydot11_accesspoints,phy-IEEE802.11" \
   --since "-3600"
