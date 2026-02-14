@@ -184,12 +184,15 @@ def ingest_client_view(con, ts_now: int, view: str, items: list[dict]):
 
 
 def main():
+    import sys
     ap = argparse.ArgumentParser()
     ap.add_argument("--workdir", default=os.environ.get("HOMESIGSEC_WORKDIR") or os.path.join(os.getcwd(), "output"))
     ap.add_argument("--views", default="phydot11_accesspoints")
     ap.add_argument("--since", default="-300", help="Kismet last-time timestamp (e.g. -300 or epoch)")
     ap.add_argument("--full", action="store_true", help="Do not use field simplification")
     args = ap.parse_args()
+    
+    had_errors = False
 
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
@@ -261,6 +264,7 @@ def main():
         except Exception as e:
             status = "error"
             err = str(e)
+            had_errors = True
 
         finished = iso_now()
         con.execute(
@@ -276,6 +280,10 @@ def main():
         print(f"[homesigsec] view={view} status={status} items={items_count} raw_bytes={raw_bytes} gzip_bytes={gz_bytes}")
         if err:
             print(f"[homesigsec] error: {err}")
+
+    if had_errors:
+        print("[homesigsec] FATAL: one or more views failed to poll")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
