@@ -27,4 +27,4 @@ cd "$ROOT_DIR/assets"
 export HOMESIGSEC_WORKDIR="$WORKDIR"
 docker compose -p homesigsec-dashboard -f dashboard-compose.yml up -d --build
 
-echo "[homesigsec] dashboard services up (nginx published on $HOMESIGSEC_LAN_BIND and $HOMESIGSEC_TS_BIND)"
+echo "[homesigsec] dashboard services up (nginx published on ${HOMESIGSEC_BIND:-127.0.0.1:8090})"
