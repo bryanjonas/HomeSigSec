@@ -97,6 +97,18 @@ CREATE TABLE IF NOT EXISTS alerts (
   status TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS device_fingerprints (
+  device_mac TEXT PRIMARY KEY,
+  label TEXT,
+  fingerprint_hash TEXT NOT NULL,
+  features_json TEXT NOT NULL,
+  packets_total INTEGER,
+  data_bytes INTEGER,
+  first_seen INTEGER,
+  last_seen INTEGER,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS alert_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   alert_id TEXT NOT NULL,
