@@ -1,0 +1,16 @@
+# Runtime outputs
+output/
+
+# Local secrets / environment
+assets/.env
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS / editor
+.DS_Store
+.vscode/
