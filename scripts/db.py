@@ -100,9 +100,23 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE TABLE IF NOT EXISTS device_fingerprints (
   device_mac TEXT PRIMARY KEY,
   label TEXT,
-  fingerprint_hash TEXT NOT NULL,
-  features_json TEXT NOT NULL,
-  packets_total INTEGER,
+  -- Baseline (locked once established)
+  baseline_hash TEXT,
+  baseline_features_json TEXT,
+  baseline_established_at TEXT,
+  baseline_packets INTEGER,
+  -- Current observation
+  last_observed_hash TEXT,
+  last_observed_features_json TEXT,
+  last_observed_at TEXT,
+  last_packets_total INTEGER,
+  -- Refinement state
+  observations_count INTEGER DEFAULT 0,
+  match_count INTEGER DEFAULT 0,
+  drift_count INTEGER DEFAULT 0,
+  confidence REAL DEFAULT 0.0,
+  feature_weights_json TEXT,
+  -- Metadata
   data_bytes INTEGER,
   first_seen INTEGER,
   last_seen INTEGER,
