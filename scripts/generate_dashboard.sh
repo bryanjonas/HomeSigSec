@@ -763,6 +763,16 @@ body.append('<h2><span class="icon">👤</span> Unknown Device Detection</h2>')
 
 # Get all client MACs seen on watched SSIDs in recent window
 unknown_devices = []
+
+def is_locally_administered_mac(mac: str) -> bool:
+    """Check if MAC is locally administered (randomized) vs globally unique (real device)."""
+    try:
+        # Second hex digit indicates local/global: 2, 6, A, E = local
+        second_char = mac.replace(':', '')[1].lower()
+        return second_char in ('2', '6', 'a', 'e')
+    except:
+        return False
+
 if os.path.exists(DB_PATH) and watched and adguard_known_macs:
     con3 = sqlite3.connect(DB_PATH)
     con3.row_factory = sqlite3.Row
@@ -780,6 +790,9 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
     
     for r in cur.fetchall():
         mac = str(r['client_mac']).lower()
+        # Skip locally administered (randomized) MACs - these are just probing
+        if is_locally_administered_mac(mac):
+            continue
         if mac not in adguard_known_macs:
             alert_id = make_alert_id('unknown_device', mac, r['ssid'])
             if not is_dismissed(alert_id):
