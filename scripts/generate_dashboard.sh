@@ -10,6 +10,14 @@ if [[ -f "$ROOT_DIR/assets/.env" ]]; then
   set +a
 fi
 
+# Source AdGuard credentials for unknown device detection
+if [[ -f "$HOME/.openclaw/credentials/adguard.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$HOME/.openclaw/credentials/adguard.env"
+  set +a
+fi
+
 WORKDIR="${HOMESIGSEC_WORKDIR:-$ROOT_DIR/output}"
 # If the env file still has the placeholder path, fall back to repo-local output.
 if [[ "$WORKDIR" == /ABS/* ]]; then
@@ -766,27 +774,37 @@ body.append('<pre>' + html.escape(mac_cfg_text or '(missing)') + '</pre></detail
 body.append('</div>')
 
 # Unknown Devices Panel - devices seen on watched SSIDs but not in AdGuard
+# Persistent model: unknowns stay until dismissed, not age-based
 body.append('<div class="card">')
 body.append('<h2><span class="icon">👤</span> Unknown Device Detection</h2>')
-
-# Get all client MACs seen on watched SSIDs in recent window
-unknown_devices = []
 
 def is_locally_administered_mac(mac: str) -> bool:
     """Check if MAC is locally administered (randomized) vs globally unique (real device)."""
     try:
-        # Second hex digit indicates local/global: 2, 6, A, E = local
         second_char = mac.replace(':', '')[1].lower()
         return second_char in ('2', '6', 'a', 'e')
     except:
         return False
 
+# Load persistent unknown devices queue
+UNKNOWN_QUEUE_PATH = os.path.join(os.path.dirname(WATCHLIST), 'unknown_devices_queue.json')
+unknown_queue = {}
+try:
+    with open(UNKNOWN_QUEUE_PATH, 'r', encoding='utf-8') as f:
+        unknown_queue = json.load(f)
+        if not isinstance(unknown_queue, dict):
+            unknown_queue = {}
+except FileNotFoundError:
+    unknown_queue = {}
+except Exception:
+    unknown_queue = {}
+
+# Scan recent sightings and add new unknowns to queue
 if os.path.exists(DB_PATH) and watched and adguard_known_macs:
     con3 = sqlite3.connect(DB_PATH)
     con3.row_factory = sqlite3.Row
-    since = int(time.time()) - 2*3600
+    since = int(time.time()) - 2*3600  # Look at last 2 hours for new unknowns
     
-    # Get all clients seen on watched SSIDs
     q = """
     SELECT DISTINCT lower(client_mac) as client_mac, ssid, max(ts) as ts_max, signal_dbm
     FROM wifi_client_sightings
@@ -798,20 +816,62 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
     
     for r in cur.fetchall():
         mac = str(r['client_mac']).lower()
-        # Skip locally administered (randomized) MACs - these are just probing
         if is_locally_administered_mac(mac):
             continue
         if mac not in adguard_known_macs:
-            alert_id = make_alert_id('unknown_device', mac, r['ssid'])
-            if not is_dismissed(alert_id):
-                unknown_devices.append({
+            ssid = r['ssid']
+            key = f"{mac}|{ssid}"
+            ts_val = int(r['ts_max'] or 0)
+            signal_val = r['signal_dbm']
+            
+            if key not in unknown_queue:
+                # New unknown device
+                unknown_queue[key] = {
                     'mac': mac,
-                    'ssid': r['ssid'],
-                    'ts': int(r['ts_max'] or 0),
-                    'signal': r['signal_dbm'],
-                    'alert_id': alert_id,
-                })
+                    'ssid': ssid,
+                    'first_seen': ts_val,
+                    'last_seen': ts_val,
+                    'signal': signal_val,
+                }
+            else:
+                # Update last_seen and signal
+                if ts_val > (unknown_queue[key].get('last_seen') or 0):
+                    unknown_queue[key]['last_seen'] = ts_val
+                    unknown_queue[key]['signal'] = signal_val
     con3.close()
+
+# Also remove any devices that are now known (added to AdGuard since first seen)
+for key in list(unknown_queue.keys()):
+    rec = unknown_queue[key]
+    if rec.get('mac') in adguard_known_macs:
+        del unknown_queue[key]
+
+# Save updated queue
+try:
+    os.makedirs(os.path.dirname(UNKNOWN_QUEUE_PATH), exist_ok=True)
+    with open(UNKNOWN_QUEUE_PATH + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(unknown_queue, f, indent=2, sort_keys=True)
+        f.write('\n')
+    os.replace(UNKNOWN_QUEUE_PATH + '.tmp', UNKNOWN_QUEUE_PATH)
+except Exception as e:
+    print(f"[homesigsec] WARN: could not save unknown_devices_queue: {e}")
+
+# Build list for display, filtering out dismissed
+unknown_devices = []
+for key, rec in unknown_queue.items():
+    alert_id = make_alert_id('unknown_device', rec['mac'], rec['ssid'])
+    if not is_dismissed(alert_id):
+        unknown_devices.append({
+            'mac': rec['mac'],
+            'ssid': rec['ssid'],
+            'first_seen': rec.get('first_seen') or 0,
+            'ts': rec.get('last_seen') or 0,
+            'signal': rec.get('signal'),
+            'alert_id': alert_id,
+        })
+
+# Sort by last seen descending
+unknown_devices.sort(key=lambda x: x['ts'], reverse=True)
 
 if not adguard_known_macs:
     body.append('<div class="empty-state"><div class="icon">⚠️</div><p>Could not fetch AdGuard Home client list.<br>Set ADGUARD_URL, ADGUARD_USER, ADGUARD_PASS in environment.</p></div>')
@@ -827,18 +887,20 @@ else:
     if not unknown_devices:
         body.append('<div class="empty-state"><div class="icon">✅</div><p>No unknown devices detected on watched SSIDs.</p></div>')
     else:
-        for ud in unknown_devices[:20]:  # Limit to 20 to avoid huge pages
+        for ud in unknown_devices[:50]:  # Limit to 50
             alert_id = ud['alert_id']
             mac = ud['mac']
             ssid = ud['ssid']
-            ts_str = time.strftime('%Y-%m-%d %H:%M', time.localtime(ud['ts'])) if ud['ts'] else '?'
+            first_str = time.strftime('%Y-%m-%d %H:%M', time.localtime(ud['first_seen'])) if ud.get('first_seen') else '?'
+            last_str = time.strftime('%Y-%m-%d %H:%M', time.localtime(ud['ts'])) if ud['ts'] else '?'
             signal = ud['signal'] or '?'
             
             body.append(f'<div class="alert-item" id="alert-{html.escape(alert_id)}">')
             body.append(f"<h3>👤 Unknown: {html.escape(mac)}</h3>")
             body.append('<div class="metrics">')
             body.append(f"<div class='metric'><span class='label'>SSID</span> {html.escape(ssid)}</div>")
-            body.append(f"<div class='metric'><span class='label'>Last Seen</span> {html.escape(ts_str)}</div>")
+            body.append(f"<div class='metric'><span class='label'>First Seen</span> {html.escape(first_str)}</div>")
+            body.append(f"<div class='metric'><span class='label'>Last Seen</span> {html.escape(last_str)}</div>")
             body.append(f"<div class='metric'><span class='label'>Signal</span> {html.escape(str(signal))} dBm</div>")
             body.append('</div>')
             
@@ -854,8 +916,8 @@ else:
             body.append('</div></div>')
             body.append('</div>')
         
-        if len(unknown_devices) > 20:
-            body.append(f"<p class='muted'>... and {len(unknown_devices) - 20} more unknown devices (showing first 20)</p>")
+        if len(unknown_devices) > 50:
+            body.append(f"<p class='muted'>... and {len(unknown_devices) - 50} more unknown devices (showing first 50)</p>")
 
 body.append('</div>')
 
