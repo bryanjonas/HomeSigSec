@@ -39,6 +39,53 @@ except FileNotFoundError:
 except Exception:
     wl = {}
 
+# Fetch known devices from AdGuard Home (authoritative source)
+def fetch_adguard_known_macs() -> set:
+    """Fetch known device MACs from AdGuard Home /control/clients."""
+    import urllib.request
+    import urllib.parse
+    
+    url = (os.environ.get('ADGUARD_URL') or '').rstrip('/')
+    user = os.environ.get('ADGUARD_USER') or ''
+    pw = os.environ.get('ADGUARD_PASS') or ''
+    if not (url and user and pw):
+        return set()
+    
+    try:
+        # Login
+        login_body = json.dumps({"name": user, "password": pw}).encode('utf-8')
+        login_req = urllib.request.Request(
+            f"{url}/control/login",
+            data=login_body,
+            method='POST',
+            headers={'Content-Type': 'application/json'}
+        )
+        login_resp = urllib.request.urlopen(login_req, timeout=15)
+        cookies = login_resp.headers.get_all('Set-Cookie') or []
+        login_resp.read()
+        cookie = '; '.join([c.split(';', 1)[0] for c in cookies if c])
+        
+        # Get clients
+        clients_req = urllib.request.Request(f"{url}/control/clients", headers={'Cookie': cookie})
+        raw = urllib.request.urlopen(clients_req, timeout=15).read()
+        data = json.loads(raw.decode('utf-8', errors='replace'))
+        
+        macs = set()
+        for c in (data.get('clients') or []):
+            if not isinstance(c, dict):
+                continue
+            for cid in (c.get('ids') or []):
+                cid_s = str(cid).strip().lower()
+                # Check if it looks like a MAC (17 chars with colons)
+                if ':' in cid_s and len(cid_s) == 17:
+                    macs.add(cid_s)
+        return macs
+    except Exception as e:
+        print(f"[homesigsec] WARN: could not fetch AdGuard clients: {e}")
+        return set()
+
+adguard_known_macs = fetch_adguard_known_macs()
+
 watched = wl.get('watched_ssids') if isinstance(wl.get('watched_ssids'), list) else []
 approved = wl.get('approved_bssids_by_ssid') if isinstance(wl.get('approved_bssids_by_ssid'), dict) else {}
 
@@ -103,6 +150,10 @@ status = {
     'device_ssid_panel': {
         'watched_macs': len((mac_cfg.get('devices') or {}) if isinstance(mac_cfg.get('devices'), dict) else {}),
         'violations': 0,
+    },
+    'unknown_devices_panel': {
+        'known_macs': len(adguard_known_macs),
+        'unknown_count': 0,  # Updated later after computing
     }
 }
 
@@ -703,6 +754,107 @@ except Exception:
     mac_cfg_text = ''
 body.append('<details><summary>View device/SSID configuration</summary>')
 body.append('<pre>' + html.escape(mac_cfg_text or '(missing)') + '</pre></details>')
+
+body.append('</div>')
+
+# Unknown Devices Panel - devices seen on watched SSIDs but not in AdGuard
+body.append('<div class="card">')
+body.append('<h2><span class="icon">👤</span> Unknown Device Detection</h2>')
+
+# Get all client MACs seen on watched SSIDs in recent window
+unknown_devices = []
+if os.path.exists(DB_PATH) and watched and adguard_known_macs:
+    con3 = sqlite3.connect(DB_PATH)
+    con3.row_factory = sqlite3.Row
+    since = int(time.time()) - 2*3600
+    
+    # Get all clients seen on watched SSIDs
+    q = """
+    SELECT DISTINCT lower(client_mac) as client_mac, ssid, max(ts) as ts_max, signal_dbm
+    FROM wifi_client_sightings
+    WHERE ssid IN ({}) AND ts >= ? AND client_mac IS NOT NULL AND client_mac != ''
+    GROUP BY lower(client_mac), ssid
+    ORDER BY ts_max DESC
+    """.format(",".join(["?"]*len(watched)))
+    cur = con3.execute(q, [*watched, since])
+    
+    for r in cur.fetchall():
+        mac = str(r['client_mac']).lower()
+        if mac not in adguard_known_macs:
+            alert_id = make_alert_id('unknown_device', mac, r['ssid'])
+            if not is_dismissed(alert_id):
+                unknown_devices.append({
+                    'mac': mac,
+                    'ssid': r['ssid'],
+                    'ts': int(r['ts_max'] or 0),
+                    'signal': r['signal_dbm'],
+                    'alert_id': alert_id,
+                })
+    con3.close()
+
+if not adguard_known_macs:
+    body.append('<div class="empty-state"><div class="icon">⚠️</div><p>Could not fetch AdGuard Home client list.<br>Set ADGUARD_URL, ADGUARD_USER, ADGUARD_PASS in environment.</p></div>')
+elif not watched:
+    body.append('<div class="empty-state"><div class="icon">📡</div><p>No watched SSIDs configured.</p></div>')
+else:
+    unknown_class = 'danger' if unknown_devices else 'success'
+    body.append('<div class="metrics">')
+    body.append(f"<div class='metric'><span class='label'>Known Devices (AdGuard)</span> {len(adguard_known_macs)}</div>")
+    body.append(f"<div class='metric {unknown_class}'><span class='label'>Unknown on Watched SSIDs</span> {len(unknown_devices)}</div>")
+    body.append('</div>')
+    
+    if not unknown_devices:
+        body.append('<div class="empty-state"><div class="icon">✅</div><p>No unknown devices detected on watched SSIDs.</p></div>')
+    else:
+        for ud in unknown_devices[:20]:  # Limit to 20 to avoid huge pages
+            alert_id = ud['alert_id']
+            mac = ud['mac']
+            ssid = ud['ssid']
+            ts_str = time.strftime('%Y-%m-%d %H:%M', time.localtime(ud['ts'])) if ud['ts'] else '?'
+            signal = ud['signal'] or '?'
+            
+            draft_note = find_similar_feedback('unknown_device', [mac, ssid])
+            if not draft_note:
+                draft_note = "Unable to generate comments."
+            _, prev_fb = latest_feedback(alert_id)
+            prev_verdict = (prev_fb or {}).get('verdict', 'unsure')
+            
+            body.append(f'<div class="alert-item" id="alert-{html.escape(alert_id)}">')
+            body.append(f"<h3>👤 Unknown: {html.escape(mac)}</h3>")
+            body.append('<div class="metrics">')
+            body.append(f"<div class='metric'><span class='label'>SSID</span> {html.escape(ssid)}</div>")
+            body.append(f"<div class='metric'><span class='label'>Last Seen</span> {html.escape(ts_str)}</div>")
+            body.append(f"<div class='metric'><span class='label'>Signal</span> {html.escape(str(signal))} dBm</div>")
+            body.append('</div>')
+            
+            # OUI lookup hint
+            oui = mac[:8].upper().replace(':', '')
+            body.append(f"<p class='muted small'>OUI: {html.escape(mac[:8].upper())}</p>")
+            
+            # Triage dropdown
+            body.append(f'<details class="triage-toggle"><summary>💬 Triage & Comment</summary>')
+            body.append(f'<div class="triage-box" data-alert-id="{html.escape(alert_id)}">')
+            body.append(f'<textarea class="triage-note" placeholder="Add notes...">{html.escape(draft_note)}</textarea>')
+            body.append('<div class="row">')
+            
+            def verdict_opt(val, label, selected):
+                sel = ' selected' if selected == val else ''
+                return f'<option value="{val}"{sel}>{label}</option>'
+            
+            body.append('<select class="triage-verdict">')
+            body.append(verdict_opt('unsure', 'Unsure', prev_verdict))
+            body.append(verdict_opt('benign', 'Benign', prev_verdict))
+            body.append(verdict_opt('review', 'Needs Review', prev_verdict))
+            body.append(verdict_opt('suspicious', 'Suspicious', prev_verdict))
+            body.append('</select>')
+            body.append(f'<label><input type="checkbox" class="triage-dismiss"> Dismiss</label>')
+            body.append(f'<button onclick="saveFeedback(\'{html.escape(alert_id)}\')">Save</button>')
+            body.append('<span class="status"></span>')
+            body.append('</div></div></details>')
+            body.append('</div>')
+        
+        if len(unknown_devices) > 20:
+            body.append(f"<p class='muted'>... and {len(unknown_devices) - 20} more unknown devices (showing first 20)</p>")
 
 body.append('</div>')
 
