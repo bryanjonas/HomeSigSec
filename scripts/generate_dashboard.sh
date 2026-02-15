@@ -186,12 +186,15 @@ class AdGuardEnricher:
 adguard_enricher = AdGuardEnricher()
 
 def get_other_probed_ssids(con, mac: str, exclude_ssids: list) -> list:
-    """Get other SSIDs this MAC has been seen on."""
+    """Get other SSIDs this MAC has actually connected to (not just probed)."""
     try:
         exclude_set = set(s.lower() for s in exclude_ssids)
         rows = con.execute("""
             SELECT DISTINCT ssid FROM wifi_client_sightings 
             WHERE lower(client_mac) = ? AND ssid IS NOT NULL AND ssid != ''
+              AND associated_bssid IS NOT NULL 
+              AND associated_bssid != '' 
+              AND associated_bssid != '00:00:00:00:00:00'
         """, (mac.lower(),)).fetchall()
         return [r[0] for r in rows if r[0].lower() not in exclude_set][:10]
     except:
@@ -1104,13 +1107,13 @@ else:
             if os.path.exists(DB_PATH):
                 con_enrich = sqlite3.connect(DB_PATH)
                 other_ssids = get_other_probed_ssids(con_enrich, mac, watched)
-                body.append('<p style="margin:0 0 8px"><strong>📡 Other Networks Seen:</strong></p>')
+                body.append('<p style="margin:0 0 8px"><strong>📡 Other Networks Connected:</strong></p>')
                 if other_ssids:
                     body.append('<p style="margin:0 0 12px">')
                     body.append(', '.join(f'<code>{html.escape(s)}</code>' for s in other_ssids))
                     body.append('</p>')
                 else:
-                    body.append('<p class="muted" style="margin:0 0 12px">Only seen on watched SSIDs</p>')
+                    body.append('<p class="muted" style="margin:0 0 12px">Only connected to watched SSIDs</p>')
                 
                 # Time patterns
                 patterns = get_time_patterns(con_enrich, mac)
