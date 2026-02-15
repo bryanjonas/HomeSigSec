@@ -32,10 +32,25 @@ WATCHLIST="$STATE_DIR/ssid_approved_bssids.local.json"
 
 mkdir -p "$WWW_DIR" "$STATE_DIR"
 
-python3 - "$DAY" "$DB_PATH" "$WATCHLIST" "$WWW_DIR/index.html" "$WWW_DIR/status.json" <<'PY'
+OUI_DB="$ROOT_DIR/assets/data/oui.json"
+
+python3 - "$DAY" "$DB_PATH" "$WATCHLIST" "$WWW_DIR/index.html" "$WWW_DIR/status.json" "$OUI_DB" <<'PY'
 import json, os, sys, time, sqlite3, html
 
-DAY, DB_PATH, WATCHLIST, OUT_HTML, OUT_STATUS = sys.argv[1:6]
+DAY, DB_PATH, WATCHLIST, OUT_HTML, OUT_STATUS, OUI_DB_PATH = sys.argv[1:7]
+
+# Load OUI database for manufacturer lookup
+oui_db = {}
+try:
+    with open(OUI_DB_PATH, 'r', encoding='utf-8') as f:
+        oui_db = json.load(f)
+except Exception:
+    oui_db = {}
+
+def lookup_manufacturer(mac: str) -> str:
+    """Look up manufacturer from MAC address OUI prefix."""
+    prefix = mac.lower().replace('-', ':')[:8]  # First 3 octets: xx:xx:xx
+    return oui_db.get(prefix, "Unknown")
 
 # Load watchlist (local-only). If missing, show empty state.
 wl = {}
@@ -904,8 +919,9 @@ else:
             body.append(f"<div class='metric'><span class='label'>Signal</span> {html.escape(str(signal))} dBm</div>")
             body.append('</div>')
             
-            # OUI lookup hint
-            body.append(f"<p class='muted small'>OUI: {html.escape(mac[:8].upper())}</p>")
+            # Manufacturer lookup
+            manufacturer = lookup_manufacturer(mac)
+            body.append(f"<p class='muted small'><strong>Manufacturer:</strong> {html.escape(manufacturer)} <span style='opacity:0.6'>({html.escape(mac[:8].upper())})</span></p>")
             
             # Simple dismiss button
             body.append(f'<div class="triage-box" data-alert-id="{html.escape(alert_id)}" style="padding:8px;margin-top:8px">')
