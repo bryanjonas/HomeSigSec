@@ -813,12 +813,6 @@ else:
             ts_str = time.strftime('%Y-%m-%d %H:%M', time.localtime(ud['ts'])) if ud['ts'] else '?'
             signal = ud['signal'] or '?'
             
-            draft_note = find_similar_feedback('unknown_device', [mac, ssid])
-            if not draft_note:
-                draft_note = "Unable to generate comments."
-            _, prev_fb = latest_feedback(alert_id)
-            prev_verdict = (prev_fb or {}).get('verdict', 'unsure')
-            
             body.append(f'<div class="alert-item" id="alert-{html.escape(alert_id)}">')
             body.append(f"<h3>👤 Unknown: {html.escape(mac)}</h3>")
             body.append('<div class="metrics">')
@@ -828,29 +822,15 @@ else:
             body.append('</div>')
             
             # OUI lookup hint
-            oui = mac[:8].upper().replace(':', '')
             body.append(f"<p class='muted small'>OUI: {html.escape(mac[:8].upper())}</p>")
             
-            # Triage dropdown
-            body.append(f'<details class="triage-toggle"><summary>💬 Triage & Comment</summary>')
-            body.append(f'<div class="triage-box" data-alert-id="{html.escape(alert_id)}">')
-            body.append(f'<textarea class="triage-note" placeholder="Add notes...">{html.escape(draft_note)}</textarea>')
+            # Simple dismiss button
+            body.append(f'<div class="triage-box" data-alert-id="{html.escape(alert_id)}" style="padding:8px;margin-top:8px">')
             body.append('<div class="row">')
-            
-            def verdict_opt(val, label, selected):
-                sel = ' selected' if selected == val else ''
-                return f'<option value="{val}"{sel}>{label}</option>'
-            
-            body.append('<select class="triage-verdict">')
-            body.append(verdict_opt('unsure', 'Unsure', prev_verdict))
-            body.append(verdict_opt('benign', 'Benign', prev_verdict))
-            body.append(verdict_opt('review', 'Needs Review', prev_verdict))
-            body.append(verdict_opt('suspicious', 'Suspicious', prev_verdict))
-            body.append('</select>')
             body.append(f'<label><input type="checkbox" class="triage-dismiss"> Dismiss</label>')
             body.append(f'<button onclick="saveFeedback(\'{html.escape(alert_id)}\')">Save</button>')
             body.append('<span class="status"></span>')
-            body.append('</div></div></details>')
+            body.append('</div></div>')
             body.append('</div>')
         
         if len(unknown_devices) > 20:
