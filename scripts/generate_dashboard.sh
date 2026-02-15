@@ -109,6 +109,127 @@ def fetch_adguard_known_macs() -> set:
 
 adguard_known_macs = fetch_adguard_known_macs()
 
+# Extended AdGuard API for enrichment
+class AdGuardEnricher:
+    def __init__(self):
+        self.url = (os.environ.get('ADGUARD_URL') or '').rstrip('/')
+        self.user = os.environ.get('ADGUARD_USER') or ''
+        self.pw = os.environ.get('ADGUARD_PASS') or ''
+        self.cookie = None
+        self.mac_to_ip = {}
+        self._clients_fetched = False
+    
+    def _login(self):
+        if self.cookie:
+            return True
+        if not (self.url and self.user and self.pw):
+            return False
+        try:
+            import urllib.request
+            body = json.dumps({"name": self.user, "password": self.pw}).encode('utf-8')
+            req = urllib.request.Request(f"{self.url}/control/login", data=body, method='POST',
+                                         headers={'Content-Type': 'application/json'})
+            resp = urllib.request.urlopen(req, timeout=15)
+            cookies = resp.headers.get_all('Set-Cookie') or []
+            resp.read()
+            self.cookie = '; '.join([c.split(';', 1)[0] for c in cookies if c])
+            return True
+        except:
+            return False
+    
+    def _fetch_clients(self):
+        if self._clients_fetched:
+            return
+        if not self._login():
+            return
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"{self.url}/control/clients", headers={'Cookie': self.cookie})
+            data = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+            for c in (data.get('clients') or []):
+                ids = c.get('ids') or []
+                mac, ip = None, None
+                for cid in ids:
+                    cid_s = str(cid).strip().lower()
+                    if ':' in cid_s and len(cid_s) == 17:
+                        mac = cid_s
+                    elif '.' in cid_s:
+                        ip = cid_s
+                if mac and ip:
+                    self.mac_to_ip[mac] = ip
+            self._clients_fetched = True
+        except:
+            pass
+    
+    def get_top_domains(self, mac: str, limit: int = 5) -> list:
+        """Get top DNS domains queried by this MAC."""
+        self._fetch_clients()
+        ip = self.mac_to_ip.get(mac.lower())
+        if not ip or not self._login():
+            return []
+        try:
+            import urllib.request
+            import urllib.parse
+            params = urllib.parse.urlencode({'search': ip, 'limit': 200})
+            req = urllib.request.Request(f"{self.url}/control/querylog?{params}",
+                                         headers={'Cookie': self.cookie})
+            data = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+            counts = {}
+            for q in (data.get('data') or []):
+                domain = (q.get('question') or {}).get('name', '').rstrip('.').lower()
+                if domain and not domain.endswith('.local') and not domain.endswith('.lan'):
+                    counts[domain] = counts.get(domain, 0) + 1
+            return sorted(counts.items(), key=lambda x: -x[1])[:limit]
+        except:
+            return []
+
+adguard_enricher = AdGuardEnricher()
+
+def get_other_probed_ssids(con, mac: str, exclude_ssids: list) -> list:
+    """Get other SSIDs this MAC has been seen on."""
+    try:
+        exclude_set = set(s.lower() for s in exclude_ssids)
+        rows = con.execute("""
+            SELECT DISTINCT ssid FROM wifi_client_sightings 
+            WHERE lower(client_mac) = ? AND ssid IS NOT NULL AND ssid != ''
+        """, (mac.lower(),)).fetchall()
+        return [r[0] for r in rows if r[0].lower() not in exclude_set][:10]
+    except:
+        return []
+
+def get_time_patterns(con, mac: str) -> dict:
+    """Analyze time-of-day patterns for this MAC."""
+    try:
+        rows = con.execute("""
+            SELECT ts FROM wifi_client_sightings WHERE lower(client_mac) = ?
+        """, (mac.lower(),)).fetchall()
+        if not rows:
+            return {}
+        hours = [0] * 24
+        days = [0] * 7  # Mon=0, Sun=6
+        for (ts,) in rows:
+            if ts:
+                import datetime
+                dt = datetime.datetime.fromtimestamp(ts)
+                hours[dt.hour] += 1
+                days[dt.weekday()] += 1
+        
+        # Find peak hours
+        peak_hours = sorted(range(24), key=lambda h: -hours[h])[:3]
+        peak_hours = [h for h in peak_hours if hours[h] > 0]
+        
+        # Weekday vs weekend
+        weekday_total = sum(days[:5])
+        weekend_total = sum(days[5:])
+        
+        return {
+            'peak_hours': peak_hours,
+            'weekday_pct': int(100 * weekday_total / max(1, weekday_total + weekend_total)),
+            'total_sightings': len(rows),
+        }
+    except:
+        return {}
+
 watched = wl.get('watched_ssids') if isinstance(wl.get('watched_ssids'), list) else []
 approved = wl.get('approved_bssids_by_ssid') if isinstance(wl.get('approved_bssids_by_ssid'), dict) else {}
 
@@ -963,6 +1084,47 @@ else:
             # Manufacturer lookup
             manufacturer = lookup_manufacturer(mac)
             body.append(f"<p class='muted small'><strong>Manufacturer:</strong> {html.escape(manufacturer)} <span style='opacity:0.6'>({html.escape(mac[:8].upper())})</span></p>")
+            
+            # Enrichment dropdown
+            body.append('<details class="triage-toggle"><summary>📊 Device Intelligence</summary>')
+            body.append('<div style="padding:10px;background:var(--bg);border-radius:6px;margin-top:8px;font-size:13px">')
+            
+            # DNS queries from AdGuard
+            top_domains = adguard_enricher.get_top_domains(mac, limit=5)
+            body.append('<p style="margin:0 0 8px"><strong>🔍 Top DNS Queries:</strong></p>')
+            if top_domains:
+                body.append('<ul style="margin:0 0 12px;padding-left:20px">')
+                for domain, count in top_domains:
+                    body.append(f'<li><code>{html.escape(domain)}</code> ({count})</li>')
+                body.append('</ul>')
+            else:
+                body.append('<p class="muted" style="margin:0 0 12px">No DNS data (device not in AdGuard or no queries)</p>')
+            
+            # Other probed SSIDs
+            if os.path.exists(DB_PATH):
+                con_enrich = sqlite3.connect(DB_PATH)
+                other_ssids = get_other_probed_ssids(con_enrich, mac, watched)
+                body.append('<p style="margin:0 0 8px"><strong>📡 Other Networks Seen:</strong></p>')
+                if other_ssids:
+                    body.append('<p style="margin:0 0 12px">')
+                    body.append(', '.join(f'<code>{html.escape(s)}</code>' for s in other_ssids))
+                    body.append('</p>')
+                else:
+                    body.append('<p class="muted" style="margin:0 0 12px">Only seen on watched SSIDs</p>')
+                
+                # Time patterns
+                patterns = get_time_patterns(con_enrich, mac)
+                if patterns:
+                    body.append('<p style="margin:0 0 8px"><strong>🕐 Activity Patterns:</strong></p>')
+                    peak_str = ', '.join(f'{h}:00' for h in patterns.get('peak_hours', []))
+                    weekday_pct = patterns.get('weekday_pct', 0)
+                    total = patterns.get('total_sightings', 0)
+                    body.append(f'<p style="margin:0 0 4px">Peak hours: {peak_str or "N/A"}</p>')
+                    body.append(f'<p style="margin:0 0 4px">Weekday: {weekday_pct}% / Weekend: {100-weekday_pct}%</p>')
+                    body.append(f'<p style="margin:0" class="muted">Total sightings: {total}</p>')
+                con_enrich.close()
+            
+            body.append('</div></details>')
             
             # Simple dismiss button
             body.append(f'<div class="triage-box" data-alert-id="{html.escape(alert_id)}" style="padding:8px;margin-top:8px">')
