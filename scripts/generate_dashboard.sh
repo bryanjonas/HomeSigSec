@@ -788,10 +788,11 @@ body.append('<pre>' + html.escape(mac_cfg_text or '(missing)') + '</pre></detail
 
 body.append('</div>')
 
-# Unknown Devices Panel - devices seen on watched SSIDs but not in AdGuard
+# Unknown Devices Panel - devices CONNECTED to watched SSIDs but not in AdGuard
+# Only shows associated devices (actually connected), not probe-only passersby
 # Persistent model: unknowns stay until dismissed, not age-based
 body.append('<div class="card">')
-body.append('<h2><span class="icon">👤</span> Unknown Device Detection</h2>')
+body.append('<h2><span class="icon">👤</span> Unknown Connected Devices</h2>')
 
 def is_locally_administered_mac(mac: str) -> bool:
     """Check if MAC is locally administered (randomized) vs globally unique (real device)."""
@@ -820,10 +821,16 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
     con3.row_factory = sqlite3.Row
     since = int(time.time()) - 2*3600  # Look at last 2 hours for new unknowns
     
+    # Only show devices actually CONNECTED (associated_bssid set and not null/zero)
+    # This filters out automated probe requests from neighbors' devices
     q = """
     SELECT DISTINCT lower(client_mac) as client_mac, ssid, max(ts) as ts_max, signal_dbm
     FROM wifi_client_sightings
-    WHERE ssid IN ({}) AND ts >= ? AND client_mac IS NOT NULL AND client_mac != ''
+    WHERE ssid IN ({}) AND ts >= ? 
+      AND client_mac IS NOT NULL AND client_mac != ''
+      AND associated_bssid IS NOT NULL 
+      AND associated_bssid != '' 
+      AND associated_bssid != '00:00:00:00:00:00'
     GROUP BY lower(client_mac), ssid
     ORDER BY ts_max DESC
     """.format(",".join(["?"]*len(watched)))
@@ -871,7 +878,7 @@ try:
 except Exception as e:
     print(f"[homesigsec] WARN: could not save unknown_devices_queue: {e}")
 
-# Query actual first/last seen from database for all unknown MACs
+# Query actual first/last seen from database for all unknown MACs (associated only)
 unknown_mac_times = {}
 if os.path.exists(DB_PATH) and unknown_queue:
     con4 = sqlite3.connect(DB_PATH)
@@ -883,9 +890,15 @@ if os.path.exists(DB_PATH) and unknown_queue:
                (SELECT signal_dbm FROM wifi_client_sightings w2 
                 WHERE lower(w2.client_mac) = lower(wifi_client_sightings.client_mac) 
                   AND w2.ssid = wifi_client_sightings.ssid 
+                  AND w2.associated_bssid IS NOT NULL 
+                  AND w2.associated_bssid != '' 
+                  AND w2.associated_bssid != '00:00:00:00:00:00'
                 ORDER BY w2.ts DESC LIMIT 1) as latest_signal
         FROM wifi_client_sightings
         WHERE lower(client_mac) IN ({})
+          AND associated_bssid IS NOT NULL 
+          AND associated_bssid != '' 
+          AND associated_bssid != '00:00:00:00:00:00'
         GROUP BY lower(client_mac), ssid
         """.format(",".join(["?"]*len(macs_to_query)))
         for r in con4.execute(q, macs_to_query).fetchall():
@@ -924,11 +937,11 @@ else:
     unknown_class = 'danger' if unknown_devices else 'success'
     body.append('<div class="metrics">')
     body.append(f"<div class='metric'><span class='label'>Known Devices (AdGuard)</span> {len(adguard_known_macs)}</div>")
-    body.append(f"<div class='metric {unknown_class}'><span class='label'>Unknown on Watched SSIDs</span> {len(unknown_devices)}</div>")
+    body.append(f"<div class='metric {unknown_class}'><span class='label'>Unknown Connected</span> {len(unknown_devices)}</div>")
     body.append('</div>')
     
     if not unknown_devices:
-        body.append('<div class="empty-state"><div class="icon">✅</div><p>No unknown devices detected on watched SSIDs.</p></div>')
+        body.append('<div class="empty-state"><div class="icon">✅</div><p>No unknown devices connected to watched SSIDs.</p></div>')
     else:
         for ud in unknown_devices[:50]:  # Limit to 50
             alert_id = ud['alert_id']
