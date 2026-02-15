@@ -658,11 +658,14 @@ except Exception:
     fp_map = {}
 
 ok_fp = 0
+drift_fp = 0
 ins_fp = 0
 for mac in devices.keys():
     st = (fp_map.get(str(mac).lower()) or {}).get('status')
-    if st == 'ok':
+    if st in ('ok', 'verified', 'established'):
         ok_fp += 1
+    elif st == 'drift':
+        drift_fp += 1
     elif st:
         ins_fp += 1
 
@@ -671,12 +674,15 @@ if not devices:
 else:
     viol_class = 'danger' if violations else 'success'
     fp_ok_class = 'success' if ok_fp else ''
+    fp_drift_class = 'danger' if drift_fp else ''
     fp_ins_class = 'warning' if ins_fp else ''
 
     body.append('<div class="metrics">')
     body.append(f"<div class='metric'><span class='label'>Watched Devices</span> {len(devices)}</div>")
     body.append(f"<div class='metric {viol_class}'><span class='label'>Violations</span> {len(violations)}</div>")
     body.append(f"<div class='metric {fp_ok_class}'><span class='label'>Fingerprints OK</span> {ok_fp}</div>")
+    if drift_fp:
+        body.append(f"<div class='metric {fp_drift_class}'><span class='label'>Fingerprint Drift</span> {drift_fp}</div>")
     body.append(f"<div class='metric {fp_ins_class}'><span class='label'>Fingerprints Insufficient</span> {ins_fp}</div>")
     body.append('</div>')
 
@@ -738,8 +744,10 @@ for mac, rec in sorted(devices.items(), key=lambda kv: (str(kv[1].get('label') o
     packets = fp.get('packets_total')
     fph = fp.get('fingerprint_hash') or ''
     extra = f" · packets={packets}" if packets is not None else ''
-    if st == 'ok':
-        lines.append(f"✓ {who} · fp={fph}{extra}")
+    if st in ('ok', 'verified', 'established'):
+        lines.append(f"✓ {who} · fp={fph}{extra} · {reason}")
+    elif st == 'drift':
+        lines.append(f"⚠ {who} · fp={fph}{extra} · {reason}")
     else:
         tail = (f" · {reason}" if reason else '')
         lines.append(f"✗ {who}{tail}{extra}")
