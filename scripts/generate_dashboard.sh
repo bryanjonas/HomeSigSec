@@ -754,10 +754,12 @@ if os.path.exists(DB_PATH) and devices:
     con.row_factory = sqlite3.Row
     since = int(time.time()) - 2*3600
     macs = [str(m).lower() for m in list(devices.keys())]
+    # Only flag violations for actual connections (packets_data > 0), not probes
     q = """
     SELECT lower(client_mac) as client_mac, ssid, max(ts) as ts_max
     FROM wifi_client_sightings
     WHERE lower(client_mac) IN ({}) AND ts >= ? AND ssid IS NOT NULL AND ssid != ''
+      AND packets_data IS NOT NULL AND packets_data > 0
     GROUP BY lower(client_mac), ssid
     ORDER BY ts_max DESC
     """.format(",".join(["?"]*len(macs)))
