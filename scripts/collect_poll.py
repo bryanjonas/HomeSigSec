@@ -170,15 +170,26 @@ def ingest_client_view(con, ts_now: int, view: str, items: list[dict]):
             assoc = it.get("dot11.device.last_bssid")
         assoc = str(assoc).lower() if assoc else ""
 
+        # typeset - bitmask indicating frame types seen
+        typeset = None
+        if isinstance(dot11, dict):
+            typeset = _maybe_int(dot11.get("dot11.device.typeset"))
+        if typeset is None:
+            typeset = _maybe_int(it.get("dot11.device.typeset"))
+
+        # packets and data size - better indicators of actual connection for clients
+        packets = _maybe_int(it.get("kismet.device.base.packets.total"))
+        datasize = _maybe_int(it.get("kismet.device.base.datasize"))
+
         ssid = _infer_ssid_for_bssid(con, assoc) if assoc else ""
 
         cur.execute(
             """
             INSERT OR REPLACE INTO wifi_client_sightings
-              (ts, client_mac, associated_bssid, ssid, signal_dbm, first_seen, last_seen, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              (ts, client_mac, associated_bssid, ssid, signal_dbm, typeset, packets, datasize, first_seen, last_seen, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (ts_now, mac, assoc, ssid, sig, first_time, last_time, view),
+            (ts_now, mac, assoc, ssid, sig, typeset, packets, datasize, first_time, last_time, view),
         )
     con.commit()
 
@@ -239,7 +250,10 @@ def main():
                         "kismet.device.base.first_time",
                         "kismet.device.base.last_time",
                         "kismet.device.base.signal/kismet.common.signal.last_signal",
+                        "kismet.device.base.packets.total",
+                        "kismet.device.base.datasize",
                         "dot11.device/dot11.device.last_bssid",
+                        "dot11.device/dot11.device.typeset",
                     ]
                 else:
                     payload["fields"] = [
