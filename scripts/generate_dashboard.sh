@@ -871,17 +871,45 @@ try:
 except Exception as e:
     print(f"[homesigsec] WARN: could not save unknown_devices_queue: {e}")
 
+# Query actual first/last seen from database for all unknown MACs
+unknown_mac_times = {}
+if os.path.exists(DB_PATH) and unknown_queue:
+    con4 = sqlite3.connect(DB_PATH)
+    con4.row_factory = sqlite3.Row
+    macs_to_query = list(set(rec['mac'] for rec in unknown_queue.values()))
+    if macs_to_query:
+        q = """
+        SELECT lower(client_mac) as mac, ssid, min(ts) as first_ts, max(ts) as last_ts, 
+               (SELECT signal_dbm FROM wifi_client_sightings w2 
+                WHERE lower(w2.client_mac) = lower(wifi_client_sightings.client_mac) 
+                  AND w2.ssid = wifi_client_sightings.ssid 
+                ORDER BY w2.ts DESC LIMIT 1) as latest_signal
+        FROM wifi_client_sightings
+        WHERE lower(client_mac) IN ({})
+        GROUP BY lower(client_mac), ssid
+        """.format(",".join(["?"]*len(macs_to_query)))
+        for r in con4.execute(q, macs_to_query).fetchall():
+            key = f"{r['mac']}|{r['ssid']}"
+            unknown_mac_times[key] = {
+                'first_seen': r['first_ts'],
+                'last_seen': r['last_ts'],
+                'signal': r['latest_signal'],
+            }
+    con4.close()
+
 # Build list for display, filtering out dismissed
 unknown_devices = []
 for key, rec in unknown_queue.items():
     alert_id = make_alert_id('unknown_device', rec['mac'], rec['ssid'])
     if not is_dismissed(alert_id):
+        # Use database times if available, else queue times
+        db_times = unknown_mac_times.get(key, {})
         unknown_devices.append({
             'mac': rec['mac'],
             'ssid': rec['ssid'],
-            'first_seen': rec.get('first_seen') or 0,
-            'ts': rec.get('last_seen') or 0,
-            'signal': rec.get('signal'),
+            'first_seen': db_times.get('first_seen') or rec.get('first_seen') or 0,
+            'ts': db_times.get('last_seen') or rec.get('last_seen') or 0,
+            'signal': db_times.get('signal') or rec.get('signal'),
             'alert_id': alert_id,
         })
 
