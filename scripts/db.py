@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS wifi_client_sightings (
   signal_dbm INTEGER,
   typeset INTEGER,
   packets INTEGER,
+  packets_data INTEGER,
   datasize INTEGER,
   first_seen INTEGER,
   last_seen INTEGER,

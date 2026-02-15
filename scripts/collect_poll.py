@@ -177,8 +177,16 @@ def ingest_client_view(con, ts_now: int, view: str, items: list[dict]):
         if typeset is None:
             typeset = _maybe_int(it.get("dot11.device.typeset"))
 
-        # packets and data size - better indicators of actual connection for clients
+        # Packet counts - key indicators of actual connection
+        # packets.total = all frames
+        # packets.data = DATA frames only (To-DS/From-DS) - definitive proof of association
         packets = _maybe_int(it.get("kismet.device.base.packets.total"))
+        packets_data = None
+        pkts_obj = it.get("kismet.device.base.packets")
+        if isinstance(pkts_obj, dict):
+            packets_data = _maybe_int(pkts_obj.get("kismet.device.base.packets.data"))
+        if packets_data is None:
+            packets_data = _maybe_int(it.get("kismet.device.base.packets.data"))
         datasize = _maybe_int(it.get("kismet.device.base.datasize"))
 
         ssid = _infer_ssid_for_bssid(con, assoc) if assoc else ""
@@ -186,10 +194,10 @@ def ingest_client_view(con, ts_now: int, view: str, items: list[dict]):
         cur.execute(
             """
             INSERT OR REPLACE INTO wifi_client_sightings
-              (ts, client_mac, associated_bssid, ssid, signal_dbm, typeset, packets, datasize, first_seen, last_seen, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (ts, client_mac, associated_bssid, ssid, signal_dbm, typeset, packets, packets_data, datasize, first_seen, last_seen, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (ts_now, mac, assoc, ssid, sig, typeset, packets, datasize, first_time, last_time, view),
+            (ts_now, mac, assoc, ssid, sig, typeset, packets, packets_data, datasize, first_time, last_time, view),
         )
     con.commit()
 
@@ -251,6 +259,7 @@ def main():
                         "kismet.device.base.last_time",
                         "kismet.device.base.signal/kismet.common.signal.last_signal",
                         "kismet.device.base.packets.total",
+                        "kismet.device.base.packets.data",
                         "kismet.device.base.datasize",
                         "dot11.device/dot11.device.last_bssid",
                         "dot11.device/dot11.device.typeset",

@@ -186,13 +186,13 @@ class AdGuardEnricher:
 adguard_enricher = AdGuardEnricher()
 
 def get_other_probed_ssids(con, mac: str, exclude_ssids: list) -> list:
-    """Get other SSIDs this MAC has actually transferred data with (datasize > 0)."""
+    """Get other SSIDs this MAC has exchanged data frames with (packets_data > 0)."""
     try:
         exclude_set = set(s.lower() for s in exclude_ssids)
         rows = con.execute("""
             SELECT DISTINCT ssid FROM wifi_client_sightings 
             WHERE lower(client_mac) = ? AND ssid IS NOT NULL AND ssid != ''
-              AND datasize > 0
+              AND packets_data IS NOT NULL AND packets_data > 0
         """, (mac.lower(),)).fetchall()
         return [r[0] for r in rows if r[0].lower() not in exclude_set][:10]
     except:
@@ -943,19 +943,20 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
     con3.row_factory = sqlite3.Row
     since = int(time.time()) - 2*3600  # Look at last 2 hours for new unknowns
     
-    # Only show devices that actually TRANSFERRED DATA (datasize > 0)
-    # Probe-only devices have high packet counts but 0 data bytes
-    # datasize > 0 means actual encrypted payload was exchanged
+    # Only show devices that exchanged DATA FRAMES (packets_data > 0)
+    # Per Kismet API guide: packets.data counts actual 802.11 data frames (To-DS/From-DS)
+    # Probe-only devices have packets_data = 0 (only management frames)
+    # Associated devices have packets_data > 0 (actual traffic with AP)
     q = """
     SELECT DISTINCT lower(client_mac) as client_mac, ssid, max(ts) as ts_max, signal_dbm,
-           max(packets) as max_packets, max(datasize) as max_datasize
+           max(packets) as max_packets, max(packets_data) as max_packets_data, max(datasize) as max_datasize
     FROM wifi_client_sightings
     WHERE ssid IN ({}) AND ts >= ? 
       AND client_mac IS NOT NULL AND client_mac != ''
       AND associated_bssid IS NOT NULL 
       AND associated_bssid != '' 
       AND associated_bssid != '00:00:00:00:00:00'
-      AND datasize > 0
+      AND packets_data IS NOT NULL AND packets_data > 0
     GROUP BY lower(client_mac), ssid
     ORDER BY ts_max DESC
     """.format(",".join(["?"]*len(watched)))
@@ -1003,7 +1004,7 @@ try:
 except Exception as e:
     print(f"[homesigsec] WARN: could not save unknown_devices_queue: {e}")
 
-# Query actual first/last seen from database for all unknown MACs (with data transfer)
+# Query actual first/last seen from database for all unknown MACs (with data frames)
 unknown_mac_times = {}
 if os.path.exists(DB_PATH) and unknown_queue:
     con4 = sqlite3.connect(DB_PATH)
@@ -1015,11 +1016,11 @@ if os.path.exists(DB_PATH) and unknown_queue:
                (SELECT signal_dbm FROM wifi_client_sightings w2 
                 WHERE lower(w2.client_mac) = lower(wifi_client_sightings.client_mac) 
                   AND w2.ssid = wifi_client_sightings.ssid 
-                  AND w2.datasize > 0
+                  AND w2.packets_data IS NOT NULL AND w2.packets_data > 0
                 ORDER BY w2.ts DESC LIMIT 1) as latest_signal
         FROM wifi_client_sightings
         WHERE lower(client_mac) IN ({})
-          AND datasize > 0
+          AND packets_data IS NOT NULL AND packets_data > 0
         GROUP BY lower(client_mac), ssid
         """.format(",".join(["?"]*len(macs_to_query)))
         for r in con4.execute(q, macs_to_query).fetchall():
