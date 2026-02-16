@@ -186,13 +186,17 @@ class AdGuardEnricher:
 adguard_enricher = AdGuardEnricher()
 
 def get_other_probed_ssids(con, mac: str, exclude_ssids: list) -> list:
-    """Get other SSIDs this MAC has exchanged data frames with (packets_data > 0)."""
+    """Get other SSIDs this MAC has REAL traffic with (not just NULL data frames)."""
     try:
         exclude_set = set(s.lower() for s in exclude_ssids)
         rows = con.execute("""
-            SELECT DISTINCT ssid FROM wifi_client_sightings 
+            SELECT ssid, MAX(datasize) as ds, MAX(packets_data) as pd
+            FROM wifi_client_sightings 
             WHERE lower(client_mac) = ? AND ssid IS NOT NULL AND ssid != ''
               AND packets_data IS NOT NULL AND packets_data > 0
+              AND datasize IS NOT NULL AND datasize > 5000
+            GROUP BY ssid
+            HAVING (1.0 * MAX(datasize) / MAX(packets_data)) > 50
         """, (mac.lower(),)).fetchall()
         return [r[0] for r in rows if r[0].lower() not in exclude_set][:10]
     except:
@@ -754,13 +758,16 @@ if os.path.exists(DB_PATH) and devices:
     con.row_factory = sqlite3.Row
     since = int(time.time()) - 2*3600
     macs = [str(m).lower() for m in list(devices.keys())]
-    # Only flag violations for actual connections (packets_data > 0), not probes
+    # Only flag violations for REAL traffic (not NULL data frames)
+    # Require >50 bytes/frame average and >5KB total to filter out power management frames
     q = """
-    SELECT lower(client_mac) as client_mac, ssid, max(ts) as ts_max
+    SELECT lower(client_mac) as client_mac, ssid, max(ts) as ts_max, max(datasize) as ds, max(packets_data) as pd
     FROM wifi_client_sightings
     WHERE lower(client_mac) IN ({}) AND ts >= ? AND ssid IS NOT NULL AND ssid != ''
       AND packets_data IS NOT NULL AND packets_data > 0
+      AND datasize IS NOT NULL AND datasize > 5000
     GROUP BY lower(client_mac), ssid
+    HAVING (1.0 * max(datasize) / max(packets_data)) > 50
     ORDER BY ts_max DESC
     """.format(",".join(["?"]*len(macs)))
     cur = con.execute(q, [*macs, since])
@@ -945,10 +952,10 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
     con3.row_factory = sqlite3.Row
     since = int(time.time()) - 2*3600  # Look at last 2 hours for new unknowns
     
-    # Only show devices that exchanged DATA FRAMES (packets_data > 0)
-    # Per Kismet API guide: packets.data counts actual 802.11 data frames (To-DS/From-DS)
-    # Probe-only devices have packets_data = 0 (only management frames)
-    # Associated devices have packets_data > 0 (actual traffic with AP)
+    # Only show devices with REAL traffic, not just NULL data frames
+    # NULL data frames: packets_data > 0 but tiny datasize (power management signaling)
+    # Real traffic: meaningful bytes per data frame (> 50 bytes/frame average)
+    # Also require minimum datasize to filter out noise
     q = """
     SELECT DISTINCT lower(client_mac) as client_mac, ssid, max(ts) as ts_max, signal_dbm,
            max(packets) as max_packets, max(packets_data) as max_packets_data, max(datasize) as max_datasize
@@ -959,6 +966,8 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
       AND associated_bssid != '' 
       AND associated_bssid != '00:00:00:00:00:00'
       AND packets_data IS NOT NULL AND packets_data > 0
+      AND datasize IS NOT NULL AND datasize > 5000
+      AND (1.0 * datasize / packets_data) > 50
     GROUP BY lower(client_mac), ssid
     ORDER BY ts_max DESC
     """.format(",".join(["?"]*len(watched)))
