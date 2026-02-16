@@ -8,7 +8,7 @@ attribute randomized MAC activity over time.
 
 ## Goal
 
-Build a baseline “fingerprint profile” for selected devices when they are active on **MyHomeNetwork**,
+Build a baseline "fingerprint profile" for selected devices when they are active on your **target SSID**,
 so we can later compare higher-signal events (association/authentication/handshake/data) against those
 profiles.
 
@@ -47,7 +47,7 @@ This is used for:
 - quick equality comparisons
 - dashboard display
 
-## “Enough traffic” threshold
+## "Enough traffic" threshold
 
 We currently require at least:
 - `packets_total >= --min-packets` (default used so far: 50)
@@ -99,7 +99,7 @@ Fingerprint status is displayed inside the **Select Device SSID Monitoring** pan
 ## Limitations (important)
 
 - **Not unique:** different devices can share the same fingerprint values.
-- **MAC randomization:** this does not “defeat” randomization; it provides a probabilistic signature.
+- **MAC randomization:** this does not "defeat" randomization; it provides a probabilistic signature.
 - **Depends on frames captured:** channel hopping and limited capture windows can reduce fingerprint fidelity.
 - **v1 features are coarse:** the strongest approach would parse management frame IEs (order/capabilities) from KismetDB/pcaps;
   that is not implemented yet.
@@ -107,7 +107,7 @@ Fingerprint status is displayed inside the **Select Device SSID Monitoring** pan
 ## Next improvements (planned)
 
 - Use eventbus (`DOT11_WPA_HANDSHAKE` + assoc/auth events if available) as the primary triggers for "attempt to connect".
-- Expand the feature set beyond Kismet’s fingerprint integers:
+- Expand the feature set beyond Kismet's fingerprint integers:
   - capability bits / supported rates / extended capabilities
   - more dot11 fields if exposed
-- Add probabilistic clustering + adaptive weighting (logistic regression) once we have sufficient labeled “known traffic” examples.
+- Add probabilistic clustering + adaptive weighting (logistic regression) once we have sufficient labeled "known traffic" examples.

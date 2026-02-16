@@ -55,7 +55,7 @@ ensure_env()
 import db as dbm
 from kismet_client import post_json
 
-TARGET_SSID = "MyHomeNetwork"
+TARGET_SSID = os.environ.get("HOMESIGSEC_TARGET_SSID", "MyHomeNetwork")
 
 # Fingerprint feature keys
 FEATURE_KEYS = ["kismet_type", "probe_fp", "response_fp", "beacon_fp", "typeset"]
