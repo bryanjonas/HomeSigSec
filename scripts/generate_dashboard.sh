@@ -1193,7 +1193,6 @@ else:
     body.append(f"<div class='metric'><span class='label'>AdGuard Clients</span> {len(adguard_known_macs)}</div>")
     body.append(f"<div class='metric {unknown_class}'><span class='label'>Unknown</span> {len(unknown_devices)}</div>")
     body.append('</div>')
-    body.append("<p class='muted small'>Unknown = in Kismet + confirmed by UniFi/AdGuard + not in known devices</p>")
     
     if not unknown_devices:
         body.append('<div class="empty-state"><div class="icon">✅</div><p>No unknown devices connected to watched SSIDs.</p></div>')
