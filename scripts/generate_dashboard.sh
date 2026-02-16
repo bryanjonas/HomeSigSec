@@ -118,7 +118,7 @@ def fetch_unifi_clients() -> tuple:
     import urllib.request
     import ssl
     
-    creds_path = os.path.expanduser('~/.openclaw/credentials/unifi.json')
+    creds_path = os.path.expanduser('~/.openclaw/credentials/unifi.env')
     if not os.path.exists(creds_path):
         return set(), set()
     

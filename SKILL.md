@@ -34,7 +34,7 @@ cp assets/.env.example assets/.env
 - Docker (for dashboard)
 
 Credentials should be stored in:
-- `~/.openclaw/credentials/unifi.json`
+- `~/.openclaw/credentials/unifi.env`
 - `~/.openclaw/credentials/adguard.env`
 
 ## Key Features

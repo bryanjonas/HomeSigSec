@@ -13,7 +13,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def load_credentials() -> Dict[str, str]:
     """Load UniFi credentials from config file."""
-    creds_path = Path.home() / ".openclaw/credentials/unifi.json"
+    creds_path = Path.home() / ".openclaw/credentials/unifi.env"
     if not creds_path.exists():
         raise RuntimeError(f"UniFi credentials not found: {creds_path}")
     

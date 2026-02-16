@@ -75,7 +75,7 @@ HOMESIGSEC_BIND="192.168.1.x:8090"  # LAN/Tailscale only
 
 ### 2. Configure Credentials
 
-**UniFi Controller** (`~/.openclaw/credentials/unifi.json`):
+**UniFi Controller** (`~/.openclaw/credentials/unifi.env`):
 ```
 UNIFI_HOST="unifi.lan:8443"
 UNIFI_USER="username"
