@@ -1032,7 +1032,13 @@ except Exception:
 if os.path.exists(DB_PATH) and watched and authoritative_known_macs:
     con3 = sqlite3.connect(DB_PATH)
     con3.row_factory = sqlite3.Row
-    since = int(time.time()) - 2*3600  # Look at last 2 hours for new unknowns
+    
+    # If queue is empty, scan ALL history; otherwise just last 2 hours for new additions
+    # Unknown devices persist until dismissed - no age-out
+    if unknown_queue:
+        since = int(time.time()) - 2*3600  # Incremental: last 2 hours
+    else:
+        since = 0  # Full scan: all historical data
     
     # Only show devices with REAL traffic, not just NULL data frames
     # NULL data frames: packets_data > 0 but tiny datasize (power management signaling)
