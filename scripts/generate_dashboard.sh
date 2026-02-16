@@ -109,6 +109,85 @@ def fetch_adguard_known_macs() -> set:
 
 adguard_known_macs = fetch_adguard_known_macs()
 
+def fetch_unifi_known_macs() -> set:
+    """Fetch known device MACs from UniFi Controller (all historical clients)."""
+    import urllib.request
+    import ssl
+    
+    creds_path = os.path.expanduser('~/.openclaw/credentials/unifi.json')
+    if not os.path.exists(creds_path):
+        return set()
+    
+    # Parse credentials (shell-style env file)
+    creds = {}
+    try:
+        with open(creds_path) as f:
+            for line in f:
+                line = line.strip()
+                if '=' in line and not line.startswith('#'):
+                    key, val = line.split('=', 1)
+                    creds[key.strip()] = val.strip().strip('"\'')
+    except Exception:
+        return set()
+    
+    host = creds.get('UNIFI_HOST', '')
+    user = creds.get('UNIFI_USER', '')
+    pw = creds.get('UNIFI_PASS', '')
+    if not (host and user and pw):
+        return set()
+    
+    try:
+        # Create SSL context that ignores self-signed certs
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        base_url = f"https://{host}"
+        
+        # Login to get session cookie
+        login_body = json.dumps({"username": user, "password": pw}).encode('utf-8')
+        login_req = urllib.request.Request(
+            f"{base_url}/api/login",
+            data=login_body,
+            method='POST',
+            headers={'Content-Type': 'application/json'}
+        )
+        login_resp = urllib.request.urlopen(login_req, timeout=15, context=ctx)
+        cookies = login_resp.headers.get_all('Set-Cookie') or []
+        login_resp.read()
+        cookie = '; '.join([c.split(';', 1)[0] for c in cookies if c])
+        
+        # Get all historical clients
+        clients_req = urllib.request.Request(
+            f"{base_url}/api/s/default/stat/alluser",
+            headers={'Cookie': cookie}
+        )
+        raw = urllib.request.urlopen(clients_req, timeout=15, context=ctx).read()
+        data = json.loads(raw.decode('utf-8', errors='replace'))
+        
+        macs = set()
+        for client in data.get('data', []):
+            mac = (client.get('mac') or '').lower()
+            if mac and ':' in mac:
+                macs.add(mac)
+        
+        # Logout (best effort)
+        try:
+            logout_req = urllib.request.Request(f"{base_url}/api/logout", method='POST', headers={'Cookie': cookie})
+            urllib.request.urlopen(logout_req, timeout=5, context=ctx)
+        except:
+            pass
+        
+        return macs
+    except Exception as e:
+        print(f"[homesigsec] WARN: could not fetch UniFi clients: {e}")
+        return set()
+
+unifi_known_macs = fetch_unifi_known_macs()
+
+# Combined authoritative known MACs (devices seen by UniFi OR AdGuard)
+authoritative_known_macs = adguard_known_macs | unifi_known_macs
+
 # Extended AdGuard API for enrichment
 class AdGuardEnricher:
     def __init__(self):
@@ -301,7 +380,9 @@ status = {
         'violations': 0,
     },
     'unknown_devices_panel': {
-        'known_macs': len(adguard_known_macs),
+        'known_macs': len(authoritative_known_macs),
+        'adguard_macs': len(adguard_known_macs),
+        'unifi_macs': len(unifi_known_macs),
         'unknown_count': 0,  # Updated later after computing
     }
 }
@@ -947,7 +1028,8 @@ except Exception:
     unknown_queue = {}
 
 # Scan recent sightings and add new unknowns to queue
-if os.path.exists(DB_PATH) and watched and adguard_known_macs:
+# Require device to NOT be in either UniFi (historical) OR AdGuard (DHCP/DNS)
+if os.path.exists(DB_PATH) and watched and authoritative_known_macs:
     con3 = sqlite3.connect(DB_PATH)
     con3.row_factory = sqlite3.Row
     since = int(time.time()) - 2*3600  # Look at last 2 hours for new unknowns
@@ -977,7 +1059,8 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
         mac = str(r['client_mac']).lower()
         if is_locally_administered_mac(mac):
             continue
-        if mac not in adguard_known_macs:
+        # Only flag as unknown if NOT in UniFi AND NOT in AdGuard
+        if mac not in authoritative_known_macs:
             ssid = r['ssid']
             key = f"{mac}|{ssid}"
             ts_val = int(r['ts_max'] or 0)
@@ -999,10 +1082,10 @@ if os.path.exists(DB_PATH) and watched and adguard_known_macs:
                     unknown_queue[key]['signal'] = signal_val
     con3.close()
 
-# Also remove any devices that are now known (added to AdGuard since first seen)
+# Also remove any devices that are now known (added to AdGuard/UniFi since first seen)
 for key in list(unknown_queue.keys()):
     rec = unknown_queue[key]
-    if rec.get('mac') in adguard_known_macs:
+    if rec.get('mac') in authoritative_known_macs:
         del unknown_queue[key]
 
 # Save updated queue
@@ -1062,14 +1145,15 @@ for key, rec in unknown_queue.items():
 # Sort by last seen descending
 unknown_devices.sort(key=lambda x: x['ts'], reverse=True)
 
-if not adguard_known_macs:
-    body.append('<div class="empty-state"><div class="icon">⚠️</div><p>Could not fetch AdGuard Home client list.<br>Set ADGUARD_URL, ADGUARD_USER, ADGUARD_PASS in environment.</p></div>')
+if not authoritative_known_macs:
+    body.append('<div class="empty-state"><div class="icon">⚠️</div><p>Could not fetch known devices from UniFi or AdGuard.<br>Check credentials in ~/.openclaw/credentials/</p></div>')
 elif not watched:
     body.append('<div class="empty-state"><div class="icon">📡</div><p>No watched SSIDs configured.</p></div>')
 else:
     unknown_class = 'danger' if unknown_devices else 'success'
     body.append('<div class="metrics">')
-    body.append(f"<div class='metric'><span class='label'>Known Devices (AdGuard)</span> {len(adguard_known_macs)}</div>")
+    body.append(f"<div class='metric'><span class='label'>Known (UniFi)</span> {len(unifi_known_macs)}</div>")
+    body.append(f"<div class='metric'><span class='label'>Known (AdGuard)</span> {len(adguard_known_macs)}</div>")
     body.append(f"<div class='metric {unknown_class}'><span class='label'>Unknown Connected</span> {len(unknown_devices)}</div>")
     body.append('</div>')
     
