@@ -109,14 +109,18 @@ def fetch_adguard_known_macs() -> set:
 
 adguard_known_macs = fetch_adguard_known_macs()
 
-def fetch_unifi_known_macs() -> set:
-    """Fetch known device MACs from UniFi Controller (all historical clients)."""
+def fetch_unifi_clients() -> tuple:
+    """Fetch device MACs from UniFi Controller.
+    
+    Returns:
+        (historical_macs, runtime_macs) - all-time known + currently connected
+    """
     import urllib.request
     import ssl
     
     creds_path = os.path.expanduser('~/.openclaw/credentials/unifi.json')
     if not os.path.exists(creds_path):
-        return set()
+        return set(), set()
     
     # Parse credentials (shell-style env file)
     creds = {}
@@ -128,13 +132,13 @@ def fetch_unifi_known_macs() -> set:
                     key, val = line.split('=', 1)
                     creds[key.strip()] = val.strip().strip('"\'')
     except Exception:
-        return set()
+        return set(), set()
     
     host = creds.get('UNIFI_HOST', '')
     user = creds.get('UNIFI_USER', '')
     pw = creds.get('UNIFI_PASS', '')
     if not (host and user and pw):
-        return set()
+        return set(), set()
     
     try:
         # Create SSL context that ignores self-signed certs
@@ -158,18 +162,32 @@ def fetch_unifi_known_macs() -> set:
         cookie = '; '.join([c.split(';', 1)[0] for c in cookies if c])
         
         # Get all historical clients
-        clients_req = urllib.request.Request(
+        hist_req = urllib.request.Request(
             f"{base_url}/api/s/default/stat/alluser",
             headers={'Cookie': cookie}
         )
-        raw = urllib.request.urlopen(clients_req, timeout=15, context=ctx).read()
-        data = json.loads(raw.decode('utf-8', errors='replace'))
+        hist_raw = urllib.request.urlopen(hist_req, timeout=15, context=ctx).read()
+        hist_data = json.loads(hist_raw.decode('utf-8', errors='replace'))
         
-        macs = set()
-        for client in data.get('data', []):
+        historical_macs = set()
+        for client in hist_data.get('data', []):
             mac = (client.get('mac') or '').lower()
             if mac and ':' in mac:
-                macs.add(mac)
+                historical_macs.add(mac)
+        
+        # Get currently connected clients (runtime)
+        runtime_req = urllib.request.Request(
+            f"{base_url}/api/s/default/stat/sta",
+            headers={'Cookie': cookie}
+        )
+        runtime_raw = urllib.request.urlopen(runtime_req, timeout=15, context=ctx).read()
+        runtime_data = json.loads(runtime_raw.decode('utf-8', errors='replace'))
+        
+        runtime_macs = set()
+        for client in runtime_data.get('data', []):
+            mac = (client.get('mac') or '').lower()
+            if mac and ':' in mac:
+                runtime_macs.add(mac)
         
         # Logout (best effort)
         try:
@@ -178,12 +196,12 @@ def fetch_unifi_known_macs() -> set:
         except:
             pass
         
-        return macs
+        return historical_macs, runtime_macs
     except Exception as e:
         print(f"[homesigsec] WARN: could not fetch UniFi clients: {e}")
-        return set()
+        return set(), set()
 
-unifi_known_macs = fetch_unifi_known_macs()
+unifi_known_macs, unifi_runtime_macs = fetch_unifi_clients()
 
 # Combined authoritative known MACs (devices seen by UniFi OR AdGuard)
 authoritative_known_macs = adguard_known_macs | unifi_known_macs
@@ -383,6 +401,7 @@ status = {
         'known_macs': len(authoritative_known_macs),
         'adguard_macs': len(adguard_known_macs),
         'unifi_macs': len(unifi_known_macs),
+        'unifi_runtime_macs': len(unifi_runtime_macs),
         'unknown_count': 0,  # Updated later after computing
     }
 }
@@ -1065,27 +1084,38 @@ if os.path.exists(DB_PATH) and watched and authoritative_known_macs:
         mac = str(r['client_mac']).lower()
         if is_locally_administered_mac(mac):
             continue
-        # Only flag as unknown if NOT in UniFi AND NOT in AdGuard
-        if mac not in authoritative_known_macs:
-            ssid = r['ssid']
-            key = f"{mac}|{ssid}"
-            ts_val = int(r['ts_max'] or 0)
-            signal_val = r['signal_dbm']
-            
-            if key not in unknown_queue:
-                # New unknown device
-                unknown_queue[key] = {
-                    'mac': mac,
-                    'ssid': ssid,
-                    'first_seen': ts_val,
-                    'last_seen': ts_val,
-                    'signal': signal_val,
-                }
-            else:
-                # Update last_seen and signal
-                if ts_val > (unknown_queue[key].get('last_seen') or 0):
-                    unknown_queue[key]['last_seen'] = ts_val
-                    unknown_queue[key]['signal'] = signal_val
+        
+        # Step 1: Verify this is a REAL connection (not Kismet misattribution)
+        # Device must be in UniFi runtime (currently connected) OR AdGuard (got DHCP/DNS)
+        # If not in either runtime source, it's a false positive from Kismet
+        if mac not in unifi_runtime_macs and mac not in adguard_known_macs:
+            continue  # False positive - Kismet sees it but no other source confirms
+        
+        # Step 2: Check if it's already a known/named device
+        # If in historical UniFi or AdGuard configured clients, skip (it's known)
+        if mac in authoritative_known_macs:
+            continue
+        
+        # Device is confirmed real (in runtime) and unknown (not in historical)
+        ssid = r['ssid']
+        key = f"{mac}|{ssid}"
+        ts_val = int(r['ts_max'] or 0)
+        signal_val = r['signal_dbm']
+        
+        if key not in unknown_queue:
+            # New unknown device
+            unknown_queue[key] = {
+                'mac': mac,
+                'ssid': ssid,
+                'first_seen': ts_val,
+                'last_seen': ts_val,
+                'signal': signal_val,
+            }
+        else:
+            # Update last_seen and signal
+            if ts_val > (unknown_queue[key].get('last_seen') or 0):
+                unknown_queue[key]['last_seen'] = ts_val
+                unknown_queue[key]['signal'] = signal_val
     con3.close()
 
 # Also remove any devices that are now known (added to AdGuard/UniFi since first seen)
@@ -1158,10 +1188,12 @@ elif not watched:
 else:
     unknown_class = 'danger' if unknown_devices else 'success'
     body.append('<div class="metrics">')
-    body.append(f"<div class='metric'><span class='label'>Known (UniFi)</span> {len(unifi_known_macs)}</div>")
-    body.append(f"<div class='metric'><span class='label'>Known (AdGuard)</span> {len(adguard_known_macs)}</div>")
-    body.append(f"<div class='metric {unknown_class}'><span class='label'>Unknown Connected</span> {len(unknown_devices)}</div>")
+    body.append(f"<div class='metric'><span class='label'>UniFi Connected</span> {len(unifi_runtime_macs)}</div>")
+    body.append(f"<div class='metric'><span class='label'>UniFi Historical</span> {len(unifi_known_macs)}</div>")
+    body.append(f"<div class='metric'><span class='label'>AdGuard Clients</span> {len(adguard_known_macs)}</div>")
+    body.append(f"<div class='metric {unknown_class}'><span class='label'>Unknown</span> {len(unknown_devices)}</div>")
     body.append('</div>')
+    body.append("<p class='muted small'>Unknown = in Kismet + confirmed by UniFi/AdGuard + not in known devices</p>")
     
     if not unknown_devices:
         body.append('<div class="empty-state"><div class="icon">✅</div><p>No unknown devices connected to watched SSIDs.</p></div>')
