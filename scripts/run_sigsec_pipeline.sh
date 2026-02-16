@@ -56,11 +56,15 @@ check_kismet() {
   fi
   
   # Try to reach Kismet status endpoint
-  if curl -sf --max-time 10 -H "KISMET: ${KISMET_API_TOKEN:-}" "$url/system/status.json" >/dev/null 2>&1; then
-    echo "[ok] Kismet responding"
+  # Accept any HTTP response (even 401) as "alive" - just checking connectivity
+  local http_code
+  http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -H "KISMET: ${KISMET_API_TOKEN:-}" "$url/system/status.json" 2>/dev/null || echo "000")
+  
+  if [[ "$http_code" =~ ^[2-4] ]]; then
+    echo "[ok] Kismet responding (HTTP $http_code)"
     return 0
   else
-    echo "[warn] Kismet not responding at $url"
+    echo "[warn] Kismet not responding at $url (HTTP $http_code)"
     return 1
   fi
 }
@@ -96,18 +100,17 @@ repair_kismet() {
 
 # Check Kismet health, attempt repair if down
 if ! check_kismet; then
+  echo "[info] Attempting auto-repair..."
   if repair_kismet; then
     # Verify it came back
     sleep 5
     if check_kismet; then
       echo "[ok] Kismet recovered after restart"
     else
-      echo "[error] Kismet still not responding after restart"
-      exit 1
+      echo "[warn] Kismet still not responding after restart, continuing anyway..."
     fi
   else
-    echo "[error] Could not repair Kismet"
-    exit 1
+    echo "[warn] Could not repair Kismet (check sudoers on Pi), continuing anyway..."
   fi
 fi
 echo ""
